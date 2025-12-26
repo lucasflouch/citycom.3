@@ -1,0 +1,136 @@
+
+export interface Provincia {
+  id: string;
+  nombre: string;
+}
+
+export interface Ciudad {
+  id: string;
+  nombre: string;
+  provinciaId: string;
+  lat?: number;
+  lng?: number;
+}
+
+export interface Rubro {
+  id: string;
+  nombre: string;
+  icon: string;
+  slug: string; // Para SEO: /gastronomia
+}
+
+export interface SubRubro {
+  id: string;
+  rubroId: string;
+  nombre: string;
+  slug: string; // Para SEO: /gastronomia/parrillas
+}
+
+export interface SubscriptionPlan {
+  id: string;
+  nombre: string; // 'Free', 'Destacado', 'Premium'
+  precio: number;
+  limiteImagenes: number;
+  limitePublicaciones: number; // Nuevo límite de publicaciones
+  tienePrioridad: boolean;
+  tieneChat: boolean;
+}
+
+export interface Profile {
+  id: string;
+  nombre?: string;
+  email?: string;
+  telefono?: string;
+  avatar_url?: string;
+  is_admin?: boolean;
+  plan_id: string; // Plan de suscripción del usuario/comerciante
+}
+
+export interface Comercio {
+  id: string;
+  nombre: string;
+  slug: string; // /mi-comercio-ideal
+  imagenUrl: string;
+  imagenes: string[];
+  rubroId: string;
+  subRubroId: string;
+  ciudadId: string;
+  usuarioId: string;
+  whatsapp: string;
+  descripcion: string;
+  direccion: string;
+  latitude?: number;
+  longitude?: number;
+  
+  // Status y Suscripción
+  isVerified: boolean;
+  isWaVerified: boolean; // Check verde de WhatsApp
+  planId: string; // Este campo es heredado de la DB pero la lógica usará el del Profile
+  
+  // Métricas (Calculadas o cacheables)
+  rating: number;
+  reviewCount: number;
+  reviews?: Review[];
+  
+  // Datos enriquecidos del plan del dueño
+  plan?: SubscriptionPlan;
+}
+
+export interface Review {
+  id: string;
+  comercio_id: string;
+  usuario_id: string;
+  usuario_nombre: string;
+  comentario: string;
+  rating: number;
+  created_at: string;
+}
+
+export interface Conversation {
+  id: string;
+  comercio_id: string;
+  cliente_id: string;
+  last_message?: string;
+  updated_at: string;
+  participant_ids: string[]; // [cliente_id, comercio_usuario_id]
+  unreadCount?: number;
+}
+
+export interface Message {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  content: string;
+  created_at: string;
+  is_read: boolean;
+}
+
+export interface AppData {
+  provincias: Provincia[];
+  ciudades: Ciudad[];
+  rubros: Rubro[];
+  subRubros: SubRubro[];
+  plans: SubscriptionPlan[];
+  comercios: Comercio[];
+  banners: Banner[];
+}
+
+export interface Banner {
+  id: string;
+  comercioId: string;
+  imagenUrl: string;
+  venceEl: string;
+}
+
+export enum Page {
+  Home = 'Home',
+  Auth = 'Auth',
+  Dashboard = 'Dashboard',
+  CreateComercio = 'CreateComercio',
+  EditComercio = 'EditComercio',
+  ComercioDetail = 'ComercioDetail',
+  Messages = 'Messages',
+  Pricing = 'Pricing' // Nueva página para planes
+}
+
+export type PageValue = Page;

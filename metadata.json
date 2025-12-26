@@ -1,0 +1,7 @@
+{
+  "name": "Copy of G.3 empiezo render vercel mercado pago",
+  "description": "Marketplace de comercios locales",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
