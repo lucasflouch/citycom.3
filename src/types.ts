@@ -16,6 +16,24 @@ export interface Rubro {
   id: string;
   nombre: string;
   icon: string;
+  slug: string; // Para SEO: /gastronomia
+}
+
+export interface SubRubro {
+  id: string;
+  rubroId: string;
+  nombre: string;
+  slug: string; // Para SEO: /gastronomia/parrillas
+}
+
+export interface SubscriptionPlan {
+  id: string;
+  nombre: string; // 'Free', 'Destacado', 'Premium'
+  precio: number;
+  limiteImagenes: number;
+  limitePublicaciones: number; // Nuevo límite de publicaciones
+  tienePrioridad: boolean;
+  tieneChat: boolean;
 }
 
 export interface Profile {
@@ -24,23 +42,35 @@ export interface Profile {
   email?: string;
   telefono?: string;
   avatar_url?: string;
+  is_admin?: boolean;
+  plan_id: string; // Plan de suscripción del usuario/comerciante
 }
 
-export interface Usuario {
+export interface Comercio {
   id: string;
-  email: string;
-  password?: string;
-  nombre?: string;
-  telefono?: string;
-}
-
-export interface PublicUser {
-  id: string;
-  email: string;
-  password?: string;
-  nombre?: string;
-  favorites?: string[];
-  history?: string[];
+  nombre: string;
+  slug: string; // /mi-comercio-ideal
+  imagenUrl: string;
+  imagenes: string[];
+  rubroId: string;
+  subRubroId: string;
+  ciudadId: string;
+  usuarioId: string;
+  whatsapp: string;
+  descripcion: string;
+  direccion: string;
+  latitude?: number;
+  longitude?: number;
+  
+  isVerified: boolean;
+  isWaVerified: boolean; 
+  planId: string; 
+  
+  rating: number;
+  reviewCount: number;
+  reviews?: Review[];
+  
+  plan?: SubscriptionPlan;
 }
 
 export interface Review {
@@ -53,38 +83,33 @@ export interface Review {
   created_at: string;
 }
 
-// Added missing Opinion interface
-export interface Opinion {
+export interface Conversation {
   id: string;
-  usuarioId: string;
-  usuarioNombre: string;
-  rating: number;
-  texto: string;
-  fecha: string;
-  likes?: string[];
-  reply?: {
-    texto: string;
-    usuarioId: string;
-    fecha: string;
-  };
+  comercio_id: string;
+  cliente_id: string;
+  last_message?: string;
+  updated_at: string;
+  participant_ids: string[]; // [cliente_id, comercio_usuario_id]
+  unreadCount?: number;
 }
 
-export interface Comercio {
+export interface Message {
   id: string;
-  nombre: string;
-  imagenUrl: string;
-  imagenes?: string[];
-  rubroId: string;
-  ciudadId: string;
-  usuarioId: string;
-  whatsapp: string;
-  descripcion?: string;
-  direccion?: string;
-  rating?: number;
-  reviewCount?: number;
-  reviews?: Review[];
-  latitude?: number;
-  longitude?: number;
+  conversation_id: string;
+  sender_id: string;
+  content: string;
+  created_at: string;
+  is_read: boolean;
+}
+
+export interface AppData {
+  provincias: Provincia[];
+  ciudades: Ciudad[];
+  rubros: Rubro[];
+  subRubros: SubRubro[];
+  plans: SubscriptionPlan[];
+  comercios: Comercio[];
+  banners: Banner[];
 }
 
 export interface Banner {
@@ -94,57 +119,44 @@ export interface Banner {
   venceEl: string;
 }
 
-// Added missing Analytics and Chat related interfaces
-export interface AnalyticsData {
-  views: number;
-  whatsappClicks: number;
-  websiteClicks: number;
-  history?: { date: string; views: number }[];
-}
-
-export interface AdminAnalyticsData {
-  totalComercios: number;
-  totalUsuarios: number;
-  totalViews: number;
-  totalWhatsAppClicks: number;
-  recentActivity: any[];
-}
-
-export interface Conversation {
-  id: string;
-  clienteId: string;
-  comercioId: string;
-  lastMessage?: string;
-  lastUpdate: string;
-  unreadCount?: number;
-}
-
-export interface ChatMessage {
-  id: string;
-  conversationId: string;
-  senderId: string;
-  content: string;
-  timestamp: string;
-  read: boolean;
-}
-
-export interface AppData {
-  provincias: Provincia[];
-  ciudades: Ciudad[];
-  rubros: Rubro[];
-  comercios: Comercio[];
-  banners: Banner[];
-  usuarios: Profile[];
-  pagos: any[];
-}
-
 export enum Page {
   Home = 'Home',
   Auth = 'Auth',
   Dashboard = 'Dashboard',
   CreateComercio = 'CreateComercio',
   EditComercio = 'EditComercio',
-  ComercioDetail = 'ComercioDetail'
+  ComercioDetail = 'ComercioDetail',
+  Messages = 'Messages',
+  Pricing = 'Pricing'
 }
 
 export type PageValue = Page;
+
+// Fix: Add missing types for apiService.ts
+export interface Usuario {
+  id: string;
+  nombre: string;
+  email: string;
+  telefono: string;
+  password?: string;
+}
+
+export interface PublicUser {
+  id: string;
+  email: string;
+  password?: string;
+  favorites?: string[];
+  history?: any[];
+}
+
+export type Opinion = Review;
+
+export interface AnalyticsData {
+  [key: string]: any;
+}
+
+export interface AdminAnalyticsData {
+  [key: string]: any;
+}
+
+export type ChatMessage = Message;

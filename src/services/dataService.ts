@@ -1,93 +1,123 @@
 
 import { supabase } from '../supabaseClient';
-import { AppData, Comercio, Ciudad, Banner, Review, Provincia } from '../types';
+import { AppData, Comercio, Review, SubscriptionPlan, Profile, SubRubro, Rubro, Ciudad, Provincia } from '../types';
 
 const mapReview = (db: any): Review => ({
   id: String(db.id),
   comercio_id: String(db.comercio_id),
   usuario_id: String(db.usuario_id),
-  usuario_nombre: db.usuario_nombre || 'Usuario Anónimo',
+  usuario_nombre: db.usuario_nombre || 'Usuario',
   comentario: db.comentario || '',
   rating: Number(db.rating) || 0,
   created_at: db.created_at || new Date().toISOString()
 });
 
-const mapComercio = (db: any, reviews: any[] = []): Comercio => {
-  const comercioReviews = reviews.filter(r => String(r.comercio_id) === String(db.id)).map(mapReview);
-  const avgRating = comercioReviews.length > 0 
-    ? comercioReviews.reduce((acc, curr) => acc + curr.rating, 0) / comercioReviews.length 
+const mapComercio = (db: any, reviewsForComercio: Review[] = [], ownerPlan?: SubscriptionPlan): Comercio => {
+  const avgRating = reviewsForComercio.length > 0 
+    ? reviewsForComercio.reduce((acc, curr) => acc + curr.rating, 0) / reviewsForComercio.length 
     : 0;
 
   return {
     id: String(db.id),
-    nombre: db.nombre || 'Sin nombre',
-    imagenUrl: db.imagen_url || 'https://images.unsplash.com/photo-1534723452862-4c874018d66d?w=400',
+    nombre: db.nombre || '',
+    slug: db.slug || '',
+    imagenUrl: db.imagen_url || '',
     imagenes: Array.isArray(db.imagenes) ? db.imagenes : [],
     rubroId: String(db.rubro_id),
+    subRubroId: String(db.sub_rub_id),
     ciudadId: String(db.ciudad_id),
     usuarioId: String(db.usuario_id),
     whatsapp: String(db.whatsapp || ''),
     descripcion: db.descripcion || '',
     direccion: db.direccion || '',
+    latitude: db.latitude ? Number(db.latitude) : undefined,
+    longitude: db.longitude ? Number(db.longitude) : undefined,
+    
+    isVerified: !!db.is_verified,
+    isWaVerified: !!db.is_wa_verified,
+    planId: String(db.plan_id || 'free'),
+    
     rating: Number(avgRating.toFixed(1)),
-    reviewCount: comercioReviews.length,
-    reviews: comercioReviews
+    reviewCount: reviewsForComercio.length,
+    reviews: reviewsForComercio,
+    
+    plan: ownerPlan
   };
 };
 
 export const fetchAppData = async (): Promise<AppData | null> => {
   try {
-    // Helper to fetch table data with individual error handling to prevent "Failed to fetch" global crashes
     const fetchSafe = async (tableName: string, orderField?: string) => {
-      try {
-        let query = supabase.from(tableName).select('*');
-        if (orderField) query = query.order(orderField);
-        const { data, error } = await query;
-        if (error) {
-          console.error(`Error loading table ${tableName}:`, error);
-          return [];
-        }
-        return data || [];
-      } catch (err) {
-        console.error(`Network error loading table ${tableName}:`, err);
+      let query = supabase.from(tableName).select('*');
+      if (orderField) query = query.order(orderField);
+      const { data, error } = await query;
+      if (error) {
+        console.warn(`Error en tabla ${tableName}:`, error.message);
         return [];
       }
+      return data || [];
     };
 
-    const [provs, ciuds, rubs, coms, bans, revs] = await Promise.all([
+    const [provs, ciuds, rubs, subRubs, plans, coms, revs, profiles] = await Promise.all([
       fetchSafe('provincias', 'nombre'),
       fetchSafe('ciudades', 'nombre'),
       fetchSafe('rubros', 'nombre'),
+      fetchSafe('sub_rubros', 'nombre'),
+      fetchSafe('subscription_plans', 'precio'),
       fetchSafe('comercios'),
-      fetchSafe('banners'),
-      fetchSafe('reviews')
+      fetchSafe('reviews'),
+      fetchSafe('profiles')
     ]);
+    
+    const reviewsByComercioId = new Map<string, Review[]>();
+    revs.forEach(review => {
+      const key = String(review.comercio_id);
+      if (!reviewsByComercioId.has(key)) reviewsByComercioId.set(key, []);
+      reviewsByComercioId.get(key)!.push(mapReview(review));
+    });
 
-    // If we have no comercios and no provincias, something might be fundamentally wrong with the connection
-    if (provs.length === 0 && coms.length === 0) {
-      console.warn("Fetched empty data from Supabase. Check connectivity or project status.");
-    }
+    const profilesMap = new Map<string, Profile>(profiles.map(p => [String(p.id), p as Profile]));
+    const plansMap = new Map<string, SubscriptionPlan>(plans.map(p => [String(p.id), {
+        id: String(p.id),
+        nombre: p.nombre,
+        precio: Number(p.precio),
+        limiteImagenes: Number(p.limite_imagenes),
+        limitePublicaciones: Number(p.limite_publicaciones || 10),
+        tienePrioridad: !!p.tiene_prioridad,
+        tieneChat: !!p.tiene_chat
+    }]));
+    
+    const defaultPlan = Array.from(plansMap.values()).find(p => p.nombre.toLowerCase() === 'gratis');
 
     return {
-      provincias: provs.map((p: any) => ({ id: String(p.id), nombre: p.nombre })),
-      ciudades: ciuds.map((c: any) => ({
+      provincias: provs.map((p: any): Provincia => ({ id: String(p.id), nombre: p.nombre })),
+      ciudades: ciuds.map((c: any): Ciudad => ({
         id: String(c.id),
         nombre: c.nombre,
         provinciaId: String(c.provincia_id)
       })),
-      rubros: rubs.map((r: any) => ({ id: String(r.id), nombre: r.nombre, icon: r.icon || '📍' })),
-      comercios: coms.map((c: any) => mapComercio(c, revs)),
-      banners: bans.map((b: any) => ({
-        id: String(b.id),
-        comercioId: String(b.comercio_id),
-        imagenUrl: b.imagen_url,
-        venceEl: b.vence_el
+      rubros: rubs.map((r: any): Rubro => ({ 
+        id: String(r.id), 
+        nombre: r.nombre, 
+        icon: r.icon || '📍',
+        slug: r.slug || r.nombre.toLowerCase().replace(/\s+/g, '-')
       })),
-      usuarios: [],
-      pagos: []
+      subRubros: subRubs.map((sr: any): SubRubro => ({
+        id: String(sr.id),
+        rubroId: String(sr.rubro_id),
+        nombre: sr.nombre,
+        slug: sr.slug || sr.nombre.toLowerCase().replace(/\s+/g, '-')
+      })),
+      plans: Array.from(plansMap.values()),
+      comercios: coms.map((c: any) => {
+        const ownerProfile = profilesMap.get(String(c.usuario_id));
+        const ownerPlan = ownerProfile ? plansMap.get(ownerProfile.plan_id) : defaultPlan;
+        return mapComercio(c, reviewsByComercioId.get(String(c.id)), ownerPlan);
+      }),
+      banners: []
     };
   } catch (error) {
-    console.error("Critical error in fetchAppData:", error);
+    console.error("Error crítico en fetchAppData:", error);
     return null;
   }
 };

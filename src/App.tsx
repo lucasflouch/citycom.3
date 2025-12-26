@@ -1,8 +1,8 @@
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabaseClient';
 import { AuthSession } from '@supabase/supabase-js';
-import { Profile, Page, Comercio, PageValue, AppData } from './types';
+import { Profile, Page, Comercio, PageValue, AppData, Conversation } from './types';
 import { fetchAppData } from './services/dataService';
 
 import HomePage from './pages/HomePage';
@@ -10,6 +10,8 @@ import AuthPage from './pages/AuthPage';
 import DashboardPage from './pages/DashboardPage';
 import CreateComercioPage from './pages/CreateComercioPage';
 import ComercioDetailPage from './pages/ComercioDetailPage';
+import MessagesPage from './pages/MessagesPage';
+import PricingPage from './pages/PricingPage';
 import Header from './components/Header';
 
 const App = () => {
@@ -18,27 +20,73 @@ const App = () => {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState<PageValue>(Page.Home);
   const [selectedComercioId, setSelectedComercioId] = useState<string | null>(null);
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   
   const [appData, setAppData] = useState<AppData>({
-    provincias: [], ciudades: [], rubros: [], comercios: [],
-    banners: [], usuarios: [], pagos: []
+    provincias: [], 
+    ciudades: [], 
+    rubros: [], 
+    subRubros: [],
+    plans: [],
+    comercios: [],
+    banners: []
   }); 
+
+  const handleLogout = useCallback(async (isAutoLogout: boolean = false) => {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+    } catch (error) {
+      console.error("Error during sign out:", error);
+    } finally {
+      setSession(null);
+      setProfile(null);
+      setPage(Page.Home);
+      if (isAutoLogout) {
+        alert("Por seguridad, tu sesión se ha cerrado automáticamente por inactividad.");
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!session) return;
+
+    let inactivityTimer: number;
+
+    const resetInactivityTimer = () => {
+      clearTimeout(inactivityTimer);
+      inactivityTimer = window.setTimeout(() => {
+        handleLogout(true);
+      }, 2 * 60 * 1000); // 2 minutos
+    };
+
+    const userActivityEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
+    userActivityEvents.forEach(event => {
+      window.addEventListener(event, resetInactivityTimer);
+    });
+
+    resetInactivityTimer();
+
+    return () => {
+      clearTimeout(inactivityTimer);
+      userActivityEvents.forEach(event => {
+        window.removeEventListener(event, resetInactivityTimer);
+      });
+    };
+  }, [session, handleLogout]);
 
   const refreshData = async () => {
     try {
-      console.log("Refreshing data from Supabase...");
       const dbData = await fetchAppData();
       if (dbData) {
         setAppData(dbData);
-      } else {
-        console.warn("Fetch returned null data. Network issue or Supabase unavailable.");
       }
     } catch (e) {
       console.error("Refresh data failed:", e);
     }
   };
 
-  const loadProfile = async (userId: string) => {
+  const loadProfile = useCallback(async (userId: string) => {
     try {
       const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
       if (error) throw error;
@@ -46,7 +94,7 @@ const App = () => {
     } catch (e) { 
       console.error("Error loading profile:", e); 
     }
-  };
+  }, []);
 
   useEffect(() => {
     const initApp = async () => {
@@ -54,10 +102,11 @@ const App = () => {
         const { data: { session: cur }, error: sessionError } = await supabase.auth.getSession();
         if (sessionError) throw sessionError;
         setSession(cur);
-        if (cur) loadProfile(cur.user.id);
+        if (cur) await loadProfile(cur.user.id);
         await refreshData();
       } catch (err) {
-        console.error("Initial app load failed:", err);
+        console.error("Initial load failed:", err);
+        await handleLogout();
       } finally {
         setLoading(false);
       }
@@ -70,20 +119,24 @@ const App = () => {
       if (newSession) {
         await loadProfile(newSession.user.id);
         if (event === 'SIGNED_IN') setPage(Page.Dashboard);
-      } else {
+      } else if (event === 'SIGNED_OUT') {
         setProfile(null);
-        if (event === 'SIGNED_OUT') setPage(Page.Home);
+        setPage(Page.Home);
       }
     });
 
     return () => authListener.subscription.unsubscribe();
-  }, []);
+  }, [loadProfile, handleLogout]);
 
-  const handleNavigate = (newPage: PageValue, comercio?: Comercio) => {
-    if (comercio) {
-      setSelectedComercioId(comercio.id);
-    } else if (newPage !== Page.EditComercio && newPage !== Page.ComercioDetail) {
-      setSelectedComercioId(null);
+  const handleNavigate = (newPage: PageValue, entity?: Comercio | Conversation) => {
+    if (newPage === Page.ComercioDetail && entity && 'nombre' in entity) {
+      setSelectedComercioId(entity.id);
+    } else if (newPage === Page.EditComercio && entity && 'nombre' in entity) {
+      setSelectedComercioId(entity.id);
+    } else if (newPage === Page.Messages && entity && 'cliente_id' in entity) {
+      setSelectedConversation(entity);
+    } else {
+        setSelectedComercioId(null);
     }
     setPage(newPage);
     window.scrollTo(0, 0);
@@ -93,7 +146,7 @@ const App = () => {
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50">
       <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-indigo-600 mb-4"></div>
       <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest text-center">
-        Conectando...
+        Arquitectando...
       </p>
     </div>
   );
@@ -102,7 +155,7 @@ const App = () => {
 
   return (
     <div className="bg-slate-50 min-h-screen font-sans">
-      <Header session={session} profile={profile} onNavigate={handleNavigate} />
+      <Header session={session} profile={profile} onNavigate={handleNavigate} onLogout={() => handleLogout(false)} />
       <main className="container mx-auto max-w-7xl px-4 py-8">
         {page === Page.Home && <HomePage onNavigate={handleNavigate} data={appData} />}
         {page === Page.Auth && <AuthPage onNavigate={handleNavigate} />}
@@ -118,6 +171,7 @@ const App = () => {
         {(page === Page.CreateComercio || page === Page.EditComercio) && (session ? 
           <CreateComercioPage 
             session={session} 
+            profile={profile}
             onNavigate={handleNavigate} 
             data={appData} 
             onComercioCreated={refreshData} 
@@ -134,6 +188,24 @@ const App = () => {
             onReviewSubmitted={refreshData}
           />
         )}
+         {page === Page.Messages && (session && profile ? (
+          <MessagesPage 
+            session={session} 
+            profile={profile} 
+            appData={appData}
+            onNavigate={handleNavigate}
+            initialConversation={selectedConversation}
+          />
+        ) : <AuthPage onNavigate={handleNavigate} />)}
+        {page === Page.Pricing && (session && profile ? (
+          <PricingPage 
+            profile={profile}
+            plans={appData.plans}
+            session={session}
+            onNavigate={handleNavigate}
+            refreshProfile={() => loadProfile(session.user.id)}
+          />
+        ) : <AuthPage onNavigate={handleNavigate} />)}
       </main>
     </div>
   );

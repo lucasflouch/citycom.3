@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Comercio, Ciudad, Provincia, Rubro } from '../types';
 
@@ -10,36 +11,45 @@ interface BusinessCardProps {
 
 const BusinessCard: React.FC<BusinessCardProps> = ({ comercio, ciudad, rubro }) => {
   const rating = comercio.rating || 4.5;
-  const reviewCount = comercio.reviewCount || Math.floor(Math.random() * 100);
 
   return (
-    <div className="flex bg-white rounded-3xl p-3 shadow-sm border border-gray-50 hover:shadow-md transition-all gap-4 items-center">
-      <div className="w-24 h-24 flex-shrink-0 relative">
+    <div className="group bg-white rounded-4xl p-4 shadow-soft border border-gray-50 hover:shadow-indigo hover:-translate-y-1 transition-all duration-500 flex items-center gap-5">
+      <div className="w-28 h-28 flex-shrink-0 relative overflow-hidden rounded-3xl">
         <img 
           src={comercio.imagenUrl} 
           alt={comercio.nombre} 
-          className="w-full h-full object-cover rounded-2xl shadow-inner"
+          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
         />
+        <div className="absolute top-2 left-2 bg-white/90 backdrop-blur-md text-[8px] font-black px-2 py-0.5 rounded-full text-indigo-600 uppercase tracking-tighter">
+          {rubro.nombre}
+        </div>
       </div>
       
-      <div className="flex-1 min-w-0">
-        <div className="flex justify-between items-start">
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{rubro.nombre}</p>
-          <span className="text-[10px] bg-green-50 text-green-600 px-2 py-0.5 rounded-full font-black">ABIERTO</span>
+      <div className="flex-1 min-w-0 py-1">
+        <div className="flex justify-between items-start mb-1">
+          <h3 className="text-lg font-[800] text-gray-900 truncate tracking-tight">{comercio.nombre}</h3>
+          <span className="text-amber-500 font-bold text-xs flex items-center gap-1">
+            ★ {rating}
+          </span>
         </div>
         
-        <h3 className="text-lg font-bold text-gray-900 truncate mt-0.5">{comercio.nombre}</h3>
+        <p className="text-gray-400 text-[11px] font-semibold flex items-center gap-1.5 mb-3 uppercase tracking-wider">
+          <span className="text-indigo-500">📍</span> {ciudad.nombre}
+        </p>
         
-        <div className="flex items-center gap-1 mt-1 text-sm">
-          <span className="text-amber-400">★</span>
-          <span className="font-bold text-gray-700">{rating}</span>
-          <span className="text-gray-300 ml-1">📍 {ciudad.nombre}</span>
+        <div className="flex items-center gap-2">
+          <div className="flex -space-x-2">
+            {[1,2,3].map(i => (
+              <div key={i} className="w-6 h-6 rounded-full border-2 border-white bg-gray-100 flex items-center justify-center text-[8px] font-bold">👤</div>
+            ))}
+          </div>
+          <span className="text-[10px] text-gray-400 font-medium">+150 clientes</span>
         </div>
       </div>
 
       <div className="pr-2">
-         <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-300">
-           &hearts;
+         <div className="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300">
+           &rarr;
          </div>
       </div>
     </div>
