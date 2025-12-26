@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { AuthSession } from '@supabase/supabase-js';
 import { Profile, SubscriptionPlan, Page, PageValue } from '../types';
@@ -16,31 +15,56 @@ const PricingPage: React.FC<PricingPageProps> = ({ profile, plans, session, onNa
   const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
 
-  const handleSelectPlan = async (planId: string) => {
-    if (planId === profile.plan_id) return;
-    
-    setLoadingPlanId(planId);
+  const handleSelectPlan = async (plan: SubscriptionPlan) => {
+    if (plan.id === profile.plan_id) return;
+
+    setLoadingPlanId(plan.id);
     setStatusMsg(null);
+
+    // Lógica para el plan gratuito: actualización directa.
+    if (plan.precio === 0) {
+      try {
+        const { error } = await supabase
+          .from('profiles')
+          .update({ plan_id: plan.id })
+          .eq('id', session.user.id);
+
+        if (error) throw error;
+
+        await refreshProfile();
+        setStatusMsg({ text: '¡Plan Gratuito activado! Redirigiendo...', type: 'success' });
+
+        setTimeout(() => {
+          onNavigate(Page.Dashboard);
+        }, 2000);
+      } catch (err: any) {
+        console.error("Error al cambiar a plan gratuito:", err);
+        setStatusMsg({ text: 'Error al cambiar de plan. Intenta de nuevo.', type: 'error' });
+        setLoadingPlanId(null);
+      }
+      return;
+    }
+
+    // Lógica para planes de pago: invocar Edge Function para Mercado Pago.
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ plan_id: planId })
-        .eq('id', session.user.id);
+      const { data, error } = await supabase.functions.invoke('create-mercadopago-preference', {
+        body: { planId: plan.id, userId: session.user.id }
+      });
+
+      if (error) throw new Error(`Function Error: ${error.message}`);
       
-      if (error) throw error;
-      
-      await refreshProfile();
-      setStatusMsg({ text: '¡Plan actualizado con éxito! Redirigiendo...', type: 'success' });
-      
-      setTimeout(() => {
-        onNavigate(Page.Dashboard);
-      }, 2000);
+      if (data && data.error) throw new Error(data.error);
+
+      if (data && data.init_point) {
+        window.location.href = data.init_point;
+      } else {
+        throw new Error('No se pudo obtener el link de pago desde la función.');
+      }
 
     } catch (err: any) {
-      console.error("Error al actualizar el plan:", err);
-      setStatusMsg({ text: 'Error al cambiar de plan. Intenta de nuevo.', type: 'error' });
-    } finally {
-      setTimeout(() => setLoadingPlanId(null), 2000);
+      console.error("Error al crear la preferencia de pago:", err);
+      setStatusMsg({ text: err.message || 'Error al iniciar el pago. Revisa la consola.', type: 'error' });
+      setLoadingPlanId(null); // Detener el loader en caso de error
     }
   };
 
@@ -63,12 +87,12 @@ const PricingPage: React.FC<PricingPageProps> = ({ profile, plans, session, onNa
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         {sortedPlans.map(plan => {
           const isCurrentPlan = plan.id === profile.plan_id;
-          const isRecommended = plan.nombre.toLowerCase() === 'intermedio';
+          const isRecommended = plan.nombre.toLowerCase().includes('destacado');
           
           return (
             <div 
               key={plan.id}
-              className={`bg-white rounded-5xl p-8 border-4 transition-all duration-300 ${isCurrentPlan ? 'border-indigo-600 shadow-indigo' : 'border-transparent hover:border-indigo-100 shadow-soft'}`}
+              className={`bg-white rounded-5xl p-8 border-4 transition-all duration-300 relative ${isCurrentPlan ? 'border-indigo-600 shadow-indigo' : 'border-transparent hover:border-indigo-100 shadow-soft'}`}
             >
               {isRecommended && !isCurrentPlan && (
                   <span className="bg-amber-400 text-amber-900 text-[10px] font-black uppercase tracking-widest px-4 py-1 rounded-full absolute -top-3 left-1/2 -translate-x-1/2">Recomendado</span>
@@ -101,15 +125,15 @@ const PricingPage: React.FC<PricingPageProps> = ({ profile, plans, session, onNa
               </ul>
 
               <button
-                onClick={() => handleSelectPlan(plan.id)}
+                onClick={() => handleSelectPlan(plan)}
                 disabled={isCurrentPlan || !!loadingPlanId}
                 className={`w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all ${
                   isCurrentPlan 
                   ? 'bg-slate-100 text-slate-400 cursor-default' 
-                  : 'bg-indigo-600 text-white shadow-indigo hover:bg-indigo-700 active:scale-95 disabled:opacity-50'
+                  : `bg-indigo-600 text-white shadow-indigo hover:bg-indigo-700 active:scale-95 disabled:opacity-50 ${loadingPlanId && loadingPlanId !== plan.id ? 'disabled:opacity-20' : ''}`
                 }`}
               >
-                {loadingPlanId === plan.id ? 'Cambiando...' : (isCurrentPlan ? 'Plan Actual' : 'Elegir Plan')}
+                {loadingPlanId === plan.id ? 'Procesando...' : (isCurrentPlan ? 'Plan Actual' : 'Elegir Plan')}
               </button>
             </div>
           );
