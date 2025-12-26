@@ -12,16 +12,14 @@ body {
   flex-direction: column; 
 }
 
-/* CRITICO: Forzar dimensiones de Leaflet */
 .leaflet-container { 
   height: 100% !important; 
   width: 100% !important; 
   outline: none;
   background: #f8fafc !important;
-  z-index: 1; /* Asegurar que el mapa esté por debajo de los popups */
+  z-index: 1;
 }
 
-/* Animación de entrada para las cards */
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
