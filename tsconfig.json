@@ -24,10 +24,9 @@
   "exclude": [
     "node_modules", 
     "dist", 
-    "*.ts", 
-    "*.tsx",
-    "*.cjs",
-    "*.js"
+    "**/*.cjs",
+    "PROJECT_INSTALLER.cjs",
+    "src/PROJECT_INSTALLER.cjs"
   ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

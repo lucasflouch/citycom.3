@@ -92,3 +92,7 @@ public
 # Build output
 dist/
 dist-ssr/
+
+# Corrupt installer artifact
+PROJECT_INSTALLER.cjs
+src/PROJECT_INSTALLER.cjs
