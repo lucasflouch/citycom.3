@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { AuthSession } from '@supabase/supabase-js';
+import { Session } from '@supabase/supabase-js';
 import { Comercio, Page, PageValue, Review, Profile, AppData, Conversation } from '../types';
 import { supabase } from '../supabaseClient';
 import Map from '../components/Map';
@@ -11,7 +11,7 @@ interface ComercioDetailPageProps {
   comercioId: string;
   appData: AppData;
   onNavigate: (page: PageValue, entity?: Comercio | Conversation) => void;
-  session: AuthSession | null;
+  session: Session | null;
   profile: Profile | null;
   onReviewSubmitted: () => Promise<void>;
 }

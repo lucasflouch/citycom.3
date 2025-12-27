@@ -1,13 +1,13 @@
 
 import React, { useState } from 'react';
-import { AuthSession } from '@supabase/supabase-js';
+import { Session } from '@supabase/supabase-js';
 import { Profile, SubscriptionPlan, Page, PageValue } from '../types';
 import { supabase } from '../supabaseClient';
 
 interface PricingPageProps {
   profile: Profile;
   plans: SubscriptionPlan[];
-  session: AuthSession;
+  session: Session;
   onNavigate: (page: PageValue) => void;
   refreshProfile: () => Promise<void>;
 }

@@ -1,12 +1,12 @@
 
 import React, { useMemo, useState } from 'react';
-import { AuthSession } from '@supabase/supabase-js';
+import { Session } from '@supabase/supabase-js';
 import { Profile, Page, PageValue, AppData, Comercio, SubscriptionPlan } from '../types';
 import BusinessCard from '../components/BusinessCard';
 import { supabase } from '../supabaseClient';
 
 interface DashboardPageProps {
-  session: AuthSession;
+  session: Session;
   profile: Profile | null;
   onNavigate: (page: PageValue, comercio?: Comercio) => void;
   data: AppData;

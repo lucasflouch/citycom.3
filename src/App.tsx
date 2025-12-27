@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabaseClient';
-import { AuthSession } from '@supabase/supabase-js';
+import { Session } from '@supabase/supabase-js';
 import { Profile, Page, Comercio, PageValue, AppData, Conversation } from './types';
 import { fetchAppData } from './services/dataService';
 
@@ -15,7 +15,7 @@ import PricingPage from './pages/PricingPage';
 import Header from './components/Header';
 
 const App = () => {
-  const [session, setSession] = useState<AuthSession | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState<PageValue>(Page.Home);

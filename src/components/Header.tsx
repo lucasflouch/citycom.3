@@ -1,10 +1,10 @@
 
 import React from 'react';
-import { AuthSession } from '@supabase/supabase-js';
+import { Session } from '@supabase/supabase-js';
 import { Page, PageValue, Profile } from '../types';
 
 interface HeaderProps {
-  session: AuthSession | null;
+  session: Session | null;
   profile: Profile | null;
   onNavigate: (page: PageValue) => void;
   onLogout: () => void;

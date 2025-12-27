@@ -8,26 +8,26 @@
     
     <!-- Leaflet JS & CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: { sans: ['Plus Jakarta Sans', 'sans-serif'] },
-            borderRadius: { '4xl': '2rem', '5xl': '3rem' },
-            boxShadow: { 
-              'soft': '0 20px 40px -15px rgba(0, 0, 0, 0.05)', 
-              'indigo': '0 25px 50px -12px rgba(99, 102, 241, 0.35)' 
-            }
-          }
-        }
-      }
-    </script>
+    <!-- Se elimina CDN de Tailwind para usar la versión compilada por Vite/PostCSS definida en package.json -->
+<script type="importmap">
+{
+  "imports": {
+    "vite": "https://esm.sh/vite@^7.3.0",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "vite-plugin-pwa": "https://esm.sh/vite-plugin-pwa@^1.2.0",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.89.0"
+  }
+}
+</script>
 </head>
   <body class="bg-[#F8FAFC] antialiased text-slate-900 overflow-x-hidden">
     <div id="root"></div>

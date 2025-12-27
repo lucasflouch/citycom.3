@@ -1,13 +1,13 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { AuthSession } from '@supabase/supabase-js';
+import { Session } from '@supabase/supabase-js';
 import { Page, PageValue, AppData, Ciudad, Comercio, SubRubro, Profile, SubscriptionPlan } from '../types';
 import { supabase } from '../supabaseClient';
 import { fetchArgentinaCiudades } from '../services/argentinaDataService';
 import Map from '../components/Map';
 
 interface CreateComercioPageProps {
-  session: AuthSession;
+  session: Session;
   profile: Profile | null;
   onNavigate: (page: PageValue) => void;
   data: AppData;

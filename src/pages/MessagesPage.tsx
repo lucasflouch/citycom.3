@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { AuthSession } from '@supabase/supabase-js';
+import { Session } from '@supabase/supabase-js';
 import { Profile, Page, PageValue, AppData, Conversation, Message, Comercio } from '../types';
 import { getConversationsForUser, getMessagesForConversation, sendMessage, markConversationAsRead } from '../services/chatService';
 import { supabase } from '../supabaseClient';
 
 interface MessagesPageProps {
-  session: AuthSession;
+  session: Session;
   profile: Profile;
   appData: AppData;
   onNavigate: (page: PageValue) => void;
