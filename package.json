@@ -10,6 +10,7 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.43.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
