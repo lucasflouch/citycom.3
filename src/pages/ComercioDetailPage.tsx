@@ -1,7 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Session } from '@supabase/supabase-js';
-import { Comercio, Page, PageValue, Review, Profile, AppData, Conversation } from '../types';
+import { Comercio, Page, PageValue, Review, Profile, AppData, Conversation, Session } from '../types';
 import { supabase } from '../supabaseClient';
 import Map from '../components/Map';
 import { findOrCreateConversation } from '../services/chatService';

@@ -1,7 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Session } from '@supabase/supabase-js';
-import { Page, PageValue, AppData, Ciudad, Comercio, SubRubro, Profile, SubscriptionPlan } from '../types';
+import { Page, PageValue, AppData, Ciudad, Comercio, SubRubro, Profile, SubscriptionPlan, Session } from '../types';
 import { supabase } from '../supabaseClient';
 import { fetchArgentinaCiudades } from '../services/argentinaDataService';
 import Map from '../components/Map';

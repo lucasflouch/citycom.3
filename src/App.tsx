@@ -1,8 +1,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabaseClient';
-import { Session } from '@supabase/supabase-js';
-import { Profile, Page, Comercio, PageValue, AppData, Conversation } from './types';
+import { Profile, Page, Comercio, PageValue, AppData, Conversation, Session } from './types';
 import { fetchAppData } from './services/dataService';
 
 import HomePage from './pages/HomePage';
@@ -22,6 +21,9 @@ const App = () => {
   const [selectedComercioId, setSelectedComercioId] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   
+  // Nuevo estado para notificaciones globales (Pagos, Auth, etc.)
+  const [notification, setNotification] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
+  
   const [appData, setAppData] = useState<AppData>({
     provincias: [], 
     ciudades: [], 
@@ -31,6 +33,14 @@ const App = () => {
     comercios: [],
     banners: []
   }); 
+
+  // Auto-ocultar notificación después de 5 segundos
+  useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => setNotification(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
 
   const handleLogout = useCallback(async (isAutoLogout: boolean = false) => {
     try {
@@ -102,8 +112,36 @@ const App = () => {
         const { data: { session: cur }, error: sessionError } = await supabase.auth.getSession();
         if (sessionError) throw sessionError;
         setSession(cur);
+        
+        // --- LOGICA DE PROCESAMIENTO DE PAGO MERCADO PAGO ---
+        const params = new URLSearchParams(window.location.search);
+        const paymentStatus = params.get('status');
+        
+        // Limpiamos la URL inmediatamente para evitar reprocesamientos
+        if (paymentStatus) {
+            window.history.replaceState({}, '', window.location.pathname);
+        }
+
         if (cur) await loadProfile(cur.user.id);
         await refreshData();
+
+        // Redirección basada en el estado del pago
+        if (paymentStatus) {
+            if (paymentStatus === 'approved') {
+                setNotification({ text: '¡Pago exitoso! Tu suscripción está activa.', type: 'success' });
+                setPage(Page.Dashboard);
+                // Forzamos recarga de perfil para intentar obtener el plan actualizado
+                if (cur) await loadProfile(cur.user.id);
+            } else if (paymentStatus === 'pending') {
+                setNotification({ text: 'Tu pago se está procesando.', type: 'success' });
+                setPage(Page.Dashboard);
+            } else if (['failure', 'rejected', 'null'].includes(paymentStatus)) {
+                setNotification({ text: 'El pago fue rechazado o cancelado.', type: 'error' });
+                setPage(Page.Pricing);
+            }
+        }
+        // ----------------------------------------------------
+
       } catch (err) {
         console.error("Initial load failed:", err);
         await handleLogout();
@@ -114,11 +152,16 @@ const App = () => {
 
     initApp();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event: string, newSession: Session | null) => {
       setSession(newSession);
       if (newSession) {
         await loadProfile(newSession.user.id);
-        if (event === 'SIGNED_IN') setPage(Page.Dashboard);
+        if (event === 'SIGNED_IN') {
+             // Solo ir al dashboard si no estamos procesando un pago fallido (que ya manejamos arriba)
+             if (!window.location.search.includes('status=failure')) {
+                 setPage(Page.Dashboard);
+             }
+        }
       } else if (event === 'SIGNED_OUT') {
         setProfile(null);
         setPage(Page.Home);
@@ -154,7 +197,15 @@ const App = () => {
   const currentComercio = appData.comercios.find(c => c.id === selectedComercioId) || null;
 
   return (
-    <div className="bg-slate-50 min-h-screen font-sans">
+    <div className="bg-slate-50 min-h-screen font-sans relative">
+      {/* Notificación Global (Toast) */}
+      {notification && (
+        <div className={`fixed top-24 left-1/2 -translate-x-1/2 z-[9999] px-8 py-4 rounded-3xl shadow-2xl animate-fade-up font-black uppercase text-xs tracking-widest text-white flex items-center gap-3 ${notification.type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}>
+            <span>{notification.type === 'success' ? '✓' : '✕'}</span>
+            {notification.text}
+        </div>
+      )}
+
       <Header session={session} profile={profile} onNavigate={handleNavigate} onLogout={() => handleLogout(false)} />
       <main className="container mx-auto max-w-7xl px-4 py-8">
         {page === Page.Home && <HomePage onNavigate={handleNavigate} data={appData} />}

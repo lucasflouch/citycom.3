@@ -1,7 +1,6 @@
 
 import React from 'react';
-import { Session } from '@supabase/supabase-js';
-import { Page, PageValue, Profile } from '../types';
+import { Page, PageValue, Profile, Session } from '../types';
 
 interface HeaderProps {
   session: Session | null;

@@ -160,3 +160,14 @@ export interface AdminAnalyticsData {
 }
 
 export type ChatMessage = Message;
+
+// Session interface compatible with Supabase to avoid import errors
+export interface Session {
+  access_token: string;
+  user: {
+    id: string;
+    email?: string;
+    [key: string]: any;
+  };
+  [key: string]: any;
+}

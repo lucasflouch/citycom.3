@@ -1,7 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { Session } from '@supabase/supabase-js';
-import { Profile, Page, PageValue, AppData, Comercio, SubscriptionPlan } from '../types';
+import { Profile, Page, PageValue, AppData, Comercio, SubscriptionPlan, Session } from '../types';
 import BusinessCard from '../components/BusinessCard';
 import { supabase } from '../supabaseClient';
 

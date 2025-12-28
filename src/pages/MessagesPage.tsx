@@ -1,7 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Session } from '@supabase/supabase-js';
-import { Profile, Page, PageValue, AppData, Conversation, Message, Comercio } from '../types';
+import { Profile, Page, PageValue, AppData, Conversation, Message, Comercio, Session } from '../types';
 import { getConversationsForUser, getMessagesForConversation, sendMessage, markConversationAsRead } from '../services/chatService';
 import { supabase } from '../supabaseClient';
 
@@ -67,7 +66,7 @@ const MessagesPage: React.FC<MessagesPageProps> = ({ session, profile, appData, 
           schema: 'public', 
           table: 'messages' 
       },
-        (payload) => {
+        (payload: any) => {
           const activeConv = activeConversationRef.current;
 
           if (payload.eventType === 'INSERT') {

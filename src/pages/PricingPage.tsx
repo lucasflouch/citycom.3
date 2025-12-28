@@ -1,7 +1,6 @@
 
 import React, { useState } from 'react';
-import { Session } from '@supabase/supabase-js';
-import { Profile, SubscriptionPlan, Page, PageValue } from '../types';
+import { Profile, SubscriptionPlan, Page, PageValue, Session } from '../types';
 import { supabase } from '../supabaseClient';
 
 interface PricingPageProps {
@@ -22,6 +21,7 @@ const PricingPage: React.FC<PricingPageProps> = ({ profile, plans, session, onNa
     setLoadingPlanId(plan.id);
     setStatusMsg(null);
 
+    // Lógica para planes gratuitos
     if (plan.precio === 0) {
       try {
         const { error } = await supabase
@@ -45,25 +45,45 @@ const PricingPage: React.FC<PricingPageProps> = ({ profile, plans, session, onNa
       return;
     }
 
+    // Lógica para planes pagos (Intento Edge Function -> Fallback WhatsApp)
     try {
+      console.log("Intentando invocar función create-mercadopago-preference...");
       const { data, error } = await supabase.functions.invoke('create-mercadopago-preference', {
         body: { planId: plan.id, userId: session.user.id }
       });
 
-      if (error) throw new Error(`Function Error: ${error.message}`);
+      if (error) {
+        // Si es un error de conexión con la función (ej. no desplegada), lanzamos un error específico
+        console.error("Supabase Invoke Error:", error);
+        throw new Error("No se pudo conectar con el servidor de pagos.");
+      }
       
       if (data && data.error) throw new Error(data.error);
 
       if (data && data.init_point) {
         window.location.href = data.init_point;
       } else {
-        throw new Error('No se pudo obtener el link de pago desde la función.');
+        throw new Error('Respuesta inválida del servidor de pagos.');
       }
 
     } catch (err: any) {
-      console.error("Error al crear la preferencia de pago:", err);
-      setStatusMsg({ text: err.message || 'Error al iniciar el pago. Revisa la consola.', type: 'error' });
-      setLoadingPlanId(null);
+      console.error("Error crítico en pago:", err);
+      
+      // FALLBACK AUTOMÁTICO A WHATSAPP
+      // Si falla la integración técnica, no perdemos la venta: enviamos al usuario a WhatsApp.
+      const adminWhatsapp = "5491123456789"; // REEMPLAZAR CON TU NÚMERO REAL
+      const text = `Hola! Quiero contratar el plan ${plan.nombre} por $${plan.precio} para mi usuario ${profile.email}. (Error técnico en web)`;
+      const waLink = `https://wa.me/${adminWhatsapp}?text=${encodeURIComponent(text)}`;
+      
+      setStatusMsg({ 
+        text: 'El sistema automático no responde. Redirigiendo a atención manual...', 
+        type: 'error' 
+      });
+
+      setTimeout(() => {
+          window.open(waLink, '_blank');
+          setLoadingPlanId(null);
+      }, 2000);
     }
   };
 
@@ -72,7 +92,7 @@ const PricingPage: React.FC<PricingPageProps> = ({ profile, plans, session, onNa
   return (
     <div className="max-w-5xl mx-auto py-8 px-4 relative">
       {statusMsg && (
-        <div className={`fixed top-24 left-1/2 -translate-x-1/2 z-[2000] px-8 py-4 rounded-3xl shadow-2xl animate-in slide-in-from-top-10 duration-500 font-black uppercase text-xs tracking-widest ${statusMsg.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
+        <div className={`fixed top-24 left-1/2 -translate-x-1/2 z-[2000] px-8 py-4 rounded-3xl shadow-2xl animate-in slide-in-from-top-10 duration-500 font-black uppercase text-xs tracking-widest ${statusMsg.type === 'success' ? 'bg-green-500 text-white' : 'bg-amber-500 text-white'}`}>
           {statusMsg.text}
         </div>
       )}
