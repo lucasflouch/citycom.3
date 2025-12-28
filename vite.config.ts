@@ -40,7 +40,7 @@ export default defineConfig({
       }
     })
   ],
-  base: './', // CRITICO: Permite que la app funcione en subrutas o iframes
+  base: '/', // ESTANDAR: Usar raíz absoluta para despliegues web
   build: {
     outDir: 'dist',
     emptyOutDir: true,
