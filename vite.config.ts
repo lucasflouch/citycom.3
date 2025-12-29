@@ -8,39 +8,39 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
+      includeAssets: ['icon.svg'], // Usamos el SVG generado
       manifest: {
         name: 'Guía de Comercios Locales',
         short_name: 'GuíaComercial',
         description: 'Descubrí y contactá los mejores comercios de tu zona.',
-        theme_color: '#ffffff',
-        background_color: '#f9fafb',
+        theme_color: '#6366f1',
+        background_color: '#f8fafc',
         display: 'standalone',
         scope: '/',
         start_url: '/',
         orientation: 'portrait',
         icons: [
           {
-            src: 'pwa-192x192.png',
+            src: 'icon.svg', // Apuntamos al SVG que acabamos de crear
             sizes: '192x192',
-            type: 'image/png'
+            type: 'image/svg+xml'
           },
           {
-            src: 'pwa-512x512.png',
+            src: 'icon.svg',
             sizes: '512x512',
-            type: 'image/png'
+            type: 'image/svg+xml'
           },
           {
-            src: 'pwa-512x512.png',
+            src: 'icon.svg',
             sizes: '512x512',
-            type: 'image/png',
+            type: 'image/svg+xml',
             purpose: 'any maskable'
           }
         ]
       }
     })
   ],
-  base: '/', // ESTANDAR: Usar raíz absoluta para despliegues web
+  base: '/', 
   build: {
     outDir: 'dist',
     emptyOutDir: true,
