@@ -47,10 +47,8 @@ const PricingPage: React.FC<PricingPageProps> = ({ profile, plans, session, onNa
 
     // Lógica para planes pagos
     try {
-      console.log("Intentando invocar función create-mercadopago-preference...");
+      console.log("Iniciando proceso de pago para plan:", plan.nombre);
       
-      // Enviamos el 'origin' actual para que MP sepa dónde volver, 
-      // independientemente de si estamos en localhost o producción.
       const { data, error } = await supabase.functions.invoke('create-mercadopago-preference', {
         body: { 
             planId: plan.id, 
@@ -59,36 +57,44 @@ const PricingPage: React.FC<PricingPageProps> = ({ profile, plans, session, onNa
         }
       });
 
+      // Manejo estricto de errores
       if (error) {
-        console.error("Supabase Invoke Error:", error);
-        throw new Error("No se pudo conectar con el servidor de pagos.");
+        console.error("Supabase Functions Error (Network/System):", error);
+        throw new Error(`Error de conexión: ${error.message || 'Desconocido'}`);
       }
       
-      if (data && data.error) throw new Error(data.error);
+      if (data?.error) {
+        console.error("Supabase Functions Error (Logic):", data.error);
+        throw new Error(`Error del servidor: ${data.error}`);
+      }
 
-      if (data && data.init_point) {
+      if (data?.init_point) {
         window.location.href = data.init_point;
       } else {
-        throw new Error('Respuesta inválida del servidor de pagos.');
+        console.error("Respuesta inesperada:", data);
+        throw new Error('El servidor no devolvió el link de pago.');
       }
 
     } catch (err: any) {
-      console.error("Error crítico en pago:", err);
+      console.error("FATAL ERROR EN PAGO:", err);
+      
+      // Mensaje amigable para el usuario pero con fallback
+      const errorMessage = err.message || "Error desconocido";
       
       // FALLBACK AUTOMÁTICO A WHATSAPP
-      const adminWhatsapp = "5491123456789"; // REEMPLAZAR CON TU NÚMERO REAL
-      const text = `Hola! Quiero contratar el plan ${plan.nombre} por $${plan.precio} para mi usuario ${profile.email}. (Error técnico en web)`;
+      const adminWhatsapp = "5491123456789"; 
+      const text = `Hola! Tuve un problema pagando en la web (${errorMessage}). Quiero el plan ${plan.nombre} por $${plan.precio} para mi usuario ${profile.email}.`;
       const waLink = `https://wa.me/${adminWhatsapp}?text=${encodeURIComponent(text)}`;
       
       setStatusMsg({ 
-        text: 'El sistema automático no responde. Redirigiendo a atención manual...', 
+        text: `Error: ${errorMessage}. Redirigiendo a soporte manual...`, 
         type: 'error' 
       });
 
       setTimeout(() => {
           window.open(waLink, '_blank');
           setLoadingPlanId(null);
-      }, 2000);
+      }, 2500);
     }
   };
 
@@ -97,7 +103,7 @@ const PricingPage: React.FC<PricingPageProps> = ({ profile, plans, session, onNa
   return (
     <div className="max-w-5xl mx-auto py-8 px-4 relative">
       {statusMsg && (
-        <div className={`fixed top-24 left-1/2 -translate-x-1/2 z-[2000] px-8 py-4 rounded-3xl shadow-2xl animate-in slide-in-from-top-10 duration-500 font-black uppercase text-xs tracking-widest ${statusMsg.type === 'success' ? 'bg-green-500 text-white' : 'bg-amber-500 text-white'}`}>
+        <div className={`fixed top-24 left-1/2 -translate-x-1/2 z-[2000] px-8 py-4 rounded-3xl shadow-2xl animate-in slide-in-from-top-10 duration-500 font-black uppercase text-xs tracking-widest ${statusMsg.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
           {statusMsg.text}
         </div>
       )}

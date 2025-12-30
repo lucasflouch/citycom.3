@@ -10,45 +10,50 @@ const corsHeaders = {
 declare const Deno: any;
 
 serve(async (req: Request) => {
+  // Manejo de preflight request (CORS)
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    const supabaseClient = createClient(
+    // 1. Inicializar cliente con SERVICE_ROLE_KEY (Super Admin)
+    // Esto evita errores de RLS y garantiza acceso a la tabla de planes sin depender de la sesión del usuario
+    const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      {
-        global: {
-          headers: { Authorization: req.headers.get('Authorization')! },
-        },
-      }
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
+    // 2. Parsear el body
     const { planId, userId, origin } = await req.json()
 
     if (!planId || !userId) {
       throw new Error('Faltan parámetros requeridos: planId o userId.')
     }
 
-    const { data: planData, error: planError } = await supabaseClient
+    // 3. Obtener datos del plan (usando admin client)
+    const { data: planData, error: planError } = await supabaseAdmin
       .from('subscription_plans')
       .select('nombre, precio')
       .eq('id', planId)
       .single()
 
-    if (planError) throw new Error(`Error al buscar plan: ${planError.message}`)
+    if (planError) {
+        console.error("Error DB:", planError)
+        throw new Error(`Error al buscar plan: ${planError.message}`)
+    }
+    
     if (!planData) throw new Error(`El plan con id "${planId}" no existe.`)
     if (planData.precio <= 0) throw new Error('Este plan es gratuito, no requiere pago.')
 
+    // 4. Configurar Mercado Pago
     const mpAccessToken = Deno.env.get('MERCADOPAGO_ACCESS_TOKEN')
     if (!mpAccessToken) {
       throw new Error('MERCADOPAGO_ACCESS_TOKEN no configurado en Supabase Secrets.')
     }
 
-    // Usamos el 'origin' enviado desde el cliente si existe, si no, fallback a SITE_URL
     const baseUrl = origin || Deno.env.get('SITE_URL') || 'http://localhost:5173'
     
+    // 5. Crear Preferencia
     const preferencePayload = {
       items: [
         {
@@ -61,10 +66,10 @@ serve(async (req: Request) => {
         },
       ],
       payer: {
-        email: 'test_user_123456@testuser.com', 
+        email: 'test_user_123456@testuser.com', // MP requiere un email válido en formato string
       },
       back_urls: {
-        success: `${baseUrl}/dashboard?status=success`, // Los params extra los pone MP automáticamente
+        success: `${baseUrl}/dashboard?status=approved`, 
         failure: `${baseUrl}/pricing?status=failure`,
         pending: `${baseUrl}/pricing?status=pending`,
       },
@@ -72,6 +77,8 @@ serve(async (req: Request) => {
       external_reference: JSON.stringify({ userId, planId }), 
       statement_descriptor: "GUIA COMERCIAL",
     }
+
+    console.log("Creando preferencia MP...");
 
     const mpResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
       method: 'POST',
@@ -84,22 +91,23 @@ serve(async (req: Request) => {
 
     if (!mpResponse.ok) {
       const errorData = await mpResponse.json()
-      console.error('Error MP:', errorData)
+      console.error('Error MP:', JSON.stringify(errorData))
       throw new Error(`Mercado Pago API Error: ${mpResponse.statusText}`)
     }
 
     const responseData = await mpResponse.json()
 
+    // 6. Responder con éxito
     return new Response(JSON.stringify({ init_point: responseData.init_point }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })
 
   } catch (error: any) {
-    console.error('Error en Edge Function:', error.message)
+    console.error('CRITICAL ERROR:', error.message)
     return new Response(JSON.stringify({ error: error.message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 400, 
+      status: 500, // Retornamos 500 para que el frontend sepa que fue un error del servidor
     })
   }
 })
