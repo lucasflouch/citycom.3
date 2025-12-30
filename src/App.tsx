@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './supabaseClient';
 import { Profile, Page, Comercio, PageValue, AppData, Conversation, Session } from './types';
 import { fetchAppData } from './services/dataService';
@@ -21,6 +21,9 @@ const App = () => {
   const [selectedComercioId, setSelectedComercioId] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   
+  // Ref para bloquear redirecciones automáticas del AuthListener si estamos procesando pagos
+  const isProcessingPayment = useRef(false);
+
   // Nuevo estado para notificaciones globales (Pagos, Auth, etc.)
   const [notification, setNotification] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
   
@@ -117,9 +120,9 @@ const App = () => {
         const params = new URLSearchParams(window.location.search);
         const paymentStatus = params.get('status');
         
-        // Limpiamos la URL inmediatamente para evitar reprocesamientos
+        // Si hay status, activamos el flag para que el AuthListener no interfiera
         if (paymentStatus) {
-            window.history.replaceState({}, '', window.location.pathname);
+           isProcessingPayment.current = true;
         }
 
         if (cur) await loadProfile(cur.user.id);
@@ -137,8 +140,16 @@ const App = () => {
                 setPage(Page.Dashboard);
             } else if (['failure', 'rejected', 'null'].includes(paymentStatus)) {
                 setNotification({ text: 'El pago fue rechazado o cancelado.', type: 'error' });
-                setPage(Page.Pricing);
+                setPage(Page.Pricing); // Forzamos ir a Pricing para reintentar
             }
+
+            // Limpiamos la URL AL FINAL y volvemos a la raíz '/' para evitar errores de rutas virtuales
+            window.history.replaceState({}, '', '/');
+            
+            // Liberamos el flag después de un momento para permitir navegación normal futura
+            setTimeout(() => {
+                isProcessingPayment.current = false;
+            }, 2000);
         }
         // ----------------------------------------------------
 
@@ -157,8 +168,8 @@ const App = () => {
       if (newSession) {
         await loadProfile(newSession.user.id);
         if (event === 'SIGNED_IN') {
-             // Solo ir al dashboard si no estamos procesando un pago fallido (que ya manejamos arriba)
-             if (!window.location.search.includes('status=failure')) {
+             // CRITICO: Solo redirigir al Dashboard si NO estamos procesando un retorno de pago
+             if (!isProcessingPayment.current) {
                  setPage(Page.Dashboard);
              }
         }
