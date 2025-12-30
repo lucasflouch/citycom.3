@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg'], // Usamos el SVG generado
+      includeAssets: ['icon.svg'], 
       manifest: {
         name: 'Guía de Comercios Locales',
         short_name: 'GuíaComercial',
@@ -21,7 +21,7 @@ export default defineConfig({
         orientation: 'portrait',
         icons: [
           {
-            src: 'icon.svg', // Apuntamos al SVG que acabamos de crear
+            src: 'icon.svg',
             sizes: '192x192',
             type: 'image/svg+xml'
           },
@@ -37,6 +37,13 @@ export default defineConfig({
             purpose: 'any maskable'
           }
         ]
+      },
+      // Estrategia de caché para evitar "Zombies"
+      workbox: {
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
+        globPatterns: ['**/*.{js,css,html,ico,png,svg}']
       }
     })
   ],
