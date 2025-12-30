@@ -21,6 +21,9 @@ const App = () => {
   const [selectedComercioId, setSelectedComercioId] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   
+  // Estado para el "Botón de Pánico" si la carga se congela
+  const [showSafetyReset, setShowSafetyReset] = useState(false);
+
   // Ref para bloquear redirecciones automáticas del AuthListener si estamos procesando pagos
   const isProcessingPayment = useRef(false);
 
@@ -36,6 +39,39 @@ const App = () => {
     comercios: [],
     banners: []
   }); 
+
+  // Watchdog: Si la carga tarda más de 8 segundos, mostramos el botón de reset
+  useEffect(() => {
+    let safetyTimer: number;
+    if (loading) {
+      safetyTimer = window.setTimeout(() => {
+        setShowSafetyReset(true);
+      }, 8000); // 8 segundos de tolerancia
+    }
+    return () => clearTimeout(safetyTimer);
+  }, [loading]);
+
+  const handleHardReset = async () => {
+    try {
+      // 1. Desregistrar todos los Service Workers (Mata al Zombie)
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const registration of registrations) {
+          await registration.unregister();
+        }
+      }
+      // 2. Limpiar caché de almacenamiento si es necesario (opcional, pero seguro)
+      if ('caches' in window) {
+         const keys = await caches.keys();
+         await Promise.all(keys.map(key => caches.delete(key)));
+      }
+    } catch (e) {
+      console.error("Error limpiando caché:", e);
+    } finally {
+      // 3. Recarga forzada desde el servidor
+      window.location.reload();
+    }
+  };
 
   // Auto-ocultar notificación después de 5 segundos
   useEffect(() => {
@@ -197,11 +233,29 @@ const App = () => {
   };
 
   if (loading) return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50">
-      <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-indigo-600 mb-4"></div>
-      <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest text-center">
-        Arquitectando...
-      </p>
+    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 px-4">
+      {!showSafetyReset ? (
+        <>
+          <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-indigo-600 mb-4"></div>
+          <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest text-center">
+            Arquitectando...
+          </p>
+        </>
+      ) : (
+        <div className="text-center animate-in fade-in duration-500 max-w-sm mx-auto bg-white p-8 rounded-[2.5rem] shadow-xl border border-red-50">
+          <div className="text-5xl mb-4">🚑</div>
+          <h3 className="text-xl font-black text-slate-800 mb-2 uppercase">¿Tarda demasiado?</h3>
+          <p className="text-slate-400 text-sm mb-6 font-medium">
+            Detectamos que la carga está demorando. Puede que tu navegador tenga una versión antigua guardada.
+          </p>
+          <button 
+            onClick={handleHardReset}
+            className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-indigo hover:bg-indigo-700 active:scale-95 transition-all"
+          >
+            Reparar y Recargar
+          </button>
+        </div>
+      )}
     </div>
   );
 
