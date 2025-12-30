@@ -60,7 +60,7 @@ const App = () => {
           await registration.unregister();
         }
       }
-      // 2. Limpiar caché de almacenamiento si es necesario (opcional, pero seguro)
+      // 2. Limpiar caché de almacenamiento si es necesario
       if ('caches' in window) {
          const keys = await caches.keys();
          await Promise.all(keys.map(key => caches.delete(key)));
@@ -68,8 +68,10 @@ const App = () => {
     } catch (e) {
       console.error("Error limpiando caché:", e);
     } finally {
-      // 3. Recarga forzada desde el servidor
-      window.location.reload();
+      // 3. REDIRECCIÓN NUCLEAR:
+      // No usamos reload() porque mantiene la URL sucia que confunde al SW corrupto.
+      // Forzamos ir a la raíz '/' con un timestamp para obligar al servidor a dar un HTML nuevo.
+      window.location.href = '/?reset_cache=' + Date.now();
     }
   };
 
