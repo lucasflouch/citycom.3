@@ -44,6 +44,19 @@ export interface Profile {
   avatar_url?: string;
   is_admin?: boolean;
   plan_id: string; // Plan de suscripción del usuario/comerciante
+  plan_expires_at?: string; // Fecha de vencimiento
+}
+
+export interface SubscriptionHistoryEntry {
+  id: string;
+  user_id: string;
+  plan_id: string;
+  start_date: string;
+  end_date?: string;
+  amount: number;
+  payment_id?: string;
+  status: 'active' | 'expired' | 'manual';
+  created_at: string;
 }
 
 export interface Comercio {
@@ -127,7 +140,9 @@ export enum Page {
   EditComercio = 'EditComercio',
   ComercioDetail = 'ComercioDetail',
   Messages = 'Messages',
-  Pricing = 'Pricing'
+  Pricing = 'Pricing',
+  Profile = 'Profile', // Nueva Página
+  Admin = 'Admin'     // Nueva Página
 }
 
 export type PageValue = Page;

@@ -11,20 +11,21 @@ import CreateComercioPage from './pages/CreateComercioPage';
 import ComercioDetailPage from './pages/ComercioDetailPage';
 import MessagesPage from './pages/MessagesPage';
 import PricingPage from './pages/PricingPage';
+import ProfilePage from './pages/ProfilePage'; // Nueva Importación
+import AdminPage from './pages/AdminPage';     // Nueva Importación
 import Header from './components/Header';
 
 const App = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [verifyingPayment, setVerifyingPayment] = useState(false); 
   const [page, setPage] = useState<PageValue>(Page.Home);
   const [selectedComercioId, setSelectedComercioId] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   
-  // Ref para bloquear redirecciones automáticas del AuthListener si estamos procesando pagos
   const isProcessingPayment = useRef(false);
 
-  // Nuevo estado para notificaciones globales (Pagos, Auth, etc.)
   const [notification, setNotification] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
   
   const [appData, setAppData] = useState<AppData>({
@@ -37,34 +38,27 @@ const App = () => {
     banners: []
   }); 
 
-  // === PROTOCOLO DE AUTOCURACIÓN (SELF-HEALING) ===
-  // Si la aplicación se queda pegada en "loading" por más de 7 segundos,
-  // asumimos que el estado local (localStorage/Cookies) está corrupto o es incompatible.
+  // === PROTOCOLO DE AUTOCURACIÓN (SELF-HEALING) MEJORADO ===
   useEffect(() => {
     const watchdogTimer = setTimeout(() => {
-      if (loading) {
-        console.warn("🚨 Watchdog: La aplicación excedió el tiempo límite de carga. Ejecutando limpieza de emergencia.");
-        
-        // 1. Intentar limpiar la clave específica de Supabase (evita conflictos de sesión)
-        // Nota: La key suele tener el formato sb-<project-ref>-auth-token
+      const params = new URLSearchParams(window.location.search);
+      const isPaymentReturn = params.has('collection_status') || params.has('payment_id');
+
+      if (loading && !isPaymentReturn) {
+        console.warn("🚨 Watchdog: La aplicación excedió el tiempo límite. Limpiando estado.");
         Object.keys(localStorage).forEach(key => {
             if (key.startsWith('sb-')) localStorage.removeItem(key);
         });
-
-        // 2. Limpieza nuclear de almacenamiento
         localStorage.clear();
         sessionStorage.clear();
-
-        // 3. Forzar recarga desde el servidor (ignorando caché del navegador)
         window.location.reload();
       }
-    }, 7000); // 7 segundos de tolerancia
+    }, 7000); 
 
     return () => clearTimeout(watchdogTimer);
   }, [loading]);
   // ================================================
 
-  // Auto-ocultar notificación después de 5 segundos
   useEffect(() => {
     if (notification) {
       const timer = setTimeout(() => setNotification(null), 5000);
@@ -90,23 +84,18 @@ const App = () => {
 
   useEffect(() => {
     if (!session) return;
-
     let inactivityTimer: number;
-
     const resetInactivityTimer = () => {
       clearTimeout(inactivityTimer);
       inactivityTimer = window.setTimeout(() => {
         handleLogout(true);
-      }, 2 * 60 * 1000); // 2 minutos
+      }, 2 * 60 * 1000); 
     };
-
     const userActivityEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
     userActivityEvents.forEach(event => {
       window.addEventListener(event, resetInactivityTimer);
     });
-
     resetInactivityTimer();
-
     return () => {
       clearTimeout(inactivityTimer);
       userActivityEvents.forEach(event => {
@@ -143,11 +132,10 @@ const App = () => {
         if (sessionError) throw sessionError;
         setSession(cur);
         
-        // --- LOGICA DE PROCESAMIENTO DE PAGO MERCADO PAGO ---
         const params = new URLSearchParams(window.location.search);
-        const paymentStatus = params.get('status');
+        const paymentStatus = params.get('status') || params.get('collection_status'); 
+        const paymentId = params.get('payment_id');
         
-        // Si hay status, activamos el flag para que el AuthListener no interfiera
         if (paymentStatus) {
            isProcessingPayment.current = true;
         }
@@ -155,35 +143,46 @@ const App = () => {
         if (cur) await loadProfile(cur.user.id);
         await refreshData();
 
-        // Redirección basada en el estado del pago
-        if (paymentStatus) {
-            if (paymentStatus === 'approved') {
-                setNotification({ text: '¡Pago exitoso! Tu suscripción está activa.', type: 'success' });
-                setPage(Page.Dashboard);
-                // Forzamos recarga de perfil para intentar obtener el plan actualizado
+        if (paymentStatus === 'approved' && paymentId) {
+            setVerifyingPayment(true);
+            try {
+                const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-payment-v1', {
+                    body: { payment_id: paymentId }
+                });
+
+                if (verifyError || !verifyData?.success) {
+                    throw new Error(verifyData?.error || 'Error en verificación');
+                }
+
+                setNotification({ text: '¡Pago verificado! Tu suscripción se actualizó.', type: 'success' });
                 if (cur) await loadProfile(cur.user.id);
-            } else if (paymentStatus === 'pending') {
-                setNotification({ text: 'Tu pago se está procesando.', type: 'success' });
                 setPage(Page.Dashboard);
-            } else if (['failure', 'rejected', 'null'].includes(paymentStatus)) {
-                setNotification({ text: 'El pago fue rechazado o cancelado.', type: 'error' });
-                setPage(Page.Pricing); // Forzamos ir a Pricing para reintentar
+
+            } catch (err) {
+                console.error("Payment verification failed:", err);
+                setNotification({ text: 'Pago recibido, pero hubo un error actualizando tu plan. Contactá soporte.', type: 'error' });
+                setPage(Page.Pricing);
+            } finally {
+                setVerifyingPayment(false);
             }
 
-            // Limpiamos la URL AL FINAL y volvemos a la raíz '/' para evitar errores de rutas virtuales
             window.history.replaceState({}, '', '/');
-            
-            // Liberamos el flag después de un momento para permitir navegación normal futura
-            setTimeout(() => {
-                isProcessingPayment.current = false;
-            }, 2000);
+            setTimeout(() => { isProcessingPayment.current = false; }, 2000);
+
+        } else if (paymentStatus === 'pending') {
+            setNotification({ text: 'Tu pago se está procesando.', type: 'success' });
+            setPage(Page.Dashboard);
+            window.history.replaceState({}, '', '/');
+            setTimeout(() => { isProcessingPayment.current = false; }, 2000);
+        } else if (paymentStatus && ['failure', 'rejected', 'null'].includes(paymentStatus)) {
+            setNotification({ text: 'El pago fue rechazado o cancelado.', type: 'error' });
+            setPage(Page.Pricing);
+            window.history.replaceState({}, '', '/');
+            setTimeout(() => { isProcessingPayment.current = false; }, 2000);
         }
-        // ----------------------------------------------------
 
       } catch (err) {
         console.error("Initial load failed:", err);
-        // Si falla la carga inicial, intentamos logout para limpiar estado, 
-        // pero el Watchdog es la red de seguridad final.
         await handleLogout();
       } finally {
         setLoading(false);
@@ -197,7 +196,6 @@ const App = () => {
       if (newSession) {
         await loadProfile(newSession.user.id);
         if (event === 'SIGNED_IN') {
-             // CRITICO: Solo redirigir al Dashboard si NO estamos procesando un retorno de pago
              if (!isProcessingPayment.current) {
                  setPage(Page.Dashboard);
              }
@@ -225,13 +223,12 @@ const App = () => {
     window.scrollTo(0, 0);
   };
 
-  if (loading) return (
+  if (loading || verifyingPayment) return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 px-4">
       <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-indigo-600 mb-4"></div>
       <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest text-center">
-        Arquitectando...
+        {verifyingPayment ? 'Verificando pago con el banco...' : 'Arquitectando...'}
       </p>
-      {/* Mensaje sutil para que el usuario sepa que hay un sistema de recuperación */}
       <p className="text-slate-300 font-medium text-[9px] mt-2 opacity-0 animate-pulse" style={{ animationDelay: '3s', animationFillMode: 'forwards' }}>
         Optimizando recursos...
       </p>
@@ -242,7 +239,6 @@ const App = () => {
 
   return (
     <div className="bg-slate-50 min-h-screen font-sans relative">
-      {/* Notificación Global (Toast) */}
       {notification && (
         <div className={`fixed top-24 left-1/2 -translate-x-1/2 z-[9999] px-8 py-4 rounded-3xl shadow-2xl animate-fade-up font-black uppercase text-xs tracking-widest text-white flex items-center gap-3 ${notification.type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}>
             <span>{notification.type === 'success' ? '✓' : '✕'}</span>
@@ -301,6 +297,23 @@ const App = () => {
             refreshProfile={() => loadProfile(session.user.id)}
           />
         ) : <AuthPage onNavigate={handleNavigate} />)}
+        
+        {/* Nuevas Páginas */}
+        {page === Page.Profile && session && profile && (
+          <ProfilePage 
+            session={session}
+            profile={profile}
+            plans={appData.plans}
+            onProfileUpdate={() => loadProfile(session.user.id)}
+          />
+        )}
+        
+        {page === Page.Admin && session && profile?.is_admin && (
+           <AdminPage 
+             session={session} 
+             plans={appData.plans}
+           />
+        )}
       </main>
     </div>
   );

@@ -45,15 +45,21 @@ const PricingPage: React.FC<PricingPageProps> = ({ profile, plans, session, onNa
       return;
     }
 
-    // Lógica para planes pagos (Intento Edge Function -> Fallback WhatsApp)
+    // Lógica para planes pagos
     try {
       console.log("Intentando invocar función create-mercadopago-preference...");
+      
+      // Enviamos el 'origin' actual para que MP sepa dónde volver, 
+      // independientemente de si estamos en localhost o producción.
       const { data, error } = await supabase.functions.invoke('create-mercadopago-preference', {
-        body: { planId: plan.id, userId: session.user.id }
+        body: { 
+            planId: plan.id, 
+            userId: session.user.id,
+            origin: window.location.origin 
+        }
       });
 
       if (error) {
-        // Si es un error de conexión con la función (ej. no desplegada), lanzamos un error específico
         console.error("Supabase Invoke Error:", error);
         throw new Error("No se pudo conectar con el servidor de pagos.");
       }
@@ -70,7 +76,6 @@ const PricingPage: React.FC<PricingPageProps> = ({ profile, plans, session, onNa
       console.error("Error crítico en pago:", err);
       
       // FALLBACK AUTOMÁTICO A WHATSAPP
-      // Si falla la integración técnica, no perdemos la venta: enviamos al usuario a WhatsApp.
       const adminWhatsapp = "5491123456789"; // REEMPLAZAR CON TU NÚMERO REAL
       const text = `Hola! Quiero contratar el plan ${plan.nombre} por $${plan.precio} para mi usuario ${profile.email}. (Error técnico en web)`;
       const waLink = `https://wa.me/${adminWhatsapp}?text=${encodeURIComponent(text)}`;
