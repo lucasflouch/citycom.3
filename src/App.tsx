@@ -11,8 +11,8 @@ import CreateComercioPage from './pages/CreateComercioPage';
 import ComercioDetailPage from './pages/ComercioDetailPage';
 import MessagesPage from './pages/MessagesPage';
 import PricingPage from './pages/PricingPage';
-import ProfilePage from './pages/ProfilePage'; // Nueva Importación
-import AdminPage from './pages/AdminPage';     // Nueva Importación
+import ProfilePage from './pages/ProfilePage';
+import AdminPage from './pages/AdminPage';
 import Header from './components/Header';
 
 const App = () => {
@@ -24,6 +24,7 @@ const App = () => {
   const [selectedComercioId, setSelectedComercioId] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   
+  // Usamos useRef para mantener estado durante renderizados iniciales críticos
   const isProcessingPayment = useRef(false);
 
   const [notification, setNotification] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
@@ -38,25 +39,22 @@ const App = () => {
     banners: []
   }); 
 
-  // === PROTOCOLO DE AUTOCURACIÓN (SELF-HEALING) MEJORADO ===
+  // === PROTOCOLO DE AUTOCURACIÓN (SELF-HEALING) ===
   useEffect(() => {
     const watchdogTimer = setTimeout(() => {
       const params = new URLSearchParams(window.location.search);
       const isPaymentReturn = params.has('collection_status') || params.has('payment_id');
 
-      if (loading && !isPaymentReturn) {
-        console.warn("🚨 Watchdog: La aplicación excedió el tiempo límite. Limpiando estado.");
-        Object.keys(localStorage).forEach(key => {
-            if (key.startsWith('sb-')) localStorage.removeItem(key);
-        });
-        localStorage.clear();
+      if (loading && !isPaymentReturn && !verifyingPayment) {
+        console.warn("🚨 Watchdog: Tiempo límite excedido. Forzando reinicio seguro.");
+        // Limpieza suave
         sessionStorage.clear();
         window.location.reload();
       }
-    }, 7000); 
+    }, 8000); 
 
     return () => clearTimeout(watchdogTimer);
-  }, [loading]);
+  }, [loading, verifyingPayment]);
   // ================================================
 
   useEffect(() => {
@@ -132,58 +130,80 @@ const App = () => {
         if (sessionError) throw sessionError;
         setSession(cur);
         
+        // --- LÓGICA DE PROCESAMIENTO DE PAGO ---
         const params = new URLSearchParams(window.location.search);
-        const paymentStatus = params.get('status') || params.get('collection_status'); 
+        // Priorizamos collection_status que es el estándar técnico de MP, fallback a status
+        const mpStatus = params.get('collection_status') || params.get('status'); 
         const paymentId = params.get('payment_id');
-        
-        if (paymentStatus) {
+        const paymentType = params.get('payment_type');
+
+        // Determinamos si estamos en un flujo de pago
+        if (mpStatus || paymentId) {
            isProcessingPayment.current = true;
+           console.log("Detectado retorno de pago:", { mpStatus, paymentId });
         }
 
         if (cur) await loadProfile(cur.user.id);
         await refreshData();
 
-        if (paymentStatus === 'approved' && paymentId) {
+        // 1. PAGO APROBADO (Soporte para 'approved' y 'success')
+        if ((mpStatus === 'approved' || mpStatus === 'success') && paymentId) {
             setVerifyingPayment(true);
             try {
+                // Llamamos a la Edge Function
                 const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-payment-v1', {
                     body: { payment_id: paymentId }
                 });
 
-                if (verifyError || !verifyData?.success) {
-                    throw new Error(verifyData?.error || 'Error en verificación');
-                }
+                if (verifyError) throw verifyError;
+                if (verifyData?.error) throw new Error(verifyData.error);
 
-                setNotification({ text: '¡Pago verificado! Tu suscripción se actualizó.', type: 'success' });
-                if (cur) await loadProfile(cur.user.id);
+                setNotification({ text: '¡Pago exitoso! Tu plan ha sido actualizado.', type: 'success' });
+                if (cur) await loadProfile(cur.user.id); // Recargar perfil para ver cambios
                 setPage(Page.Dashboard);
 
-            } catch (err) {
+            } catch (err: any) {
                 console.error("Payment verification failed:", err);
-                setNotification({ text: 'Pago recibido, pero hubo un error actualizando tu plan. Contactá soporte.', type: 'error' });
-                setPage(Page.Pricing);
+                // Si falla la verificación pero MP dijo OK, avisamos al usuario pero no bloqueamos
+                setNotification({ 
+                    text: 'Pago recibido, pero hubo una demora actualizando tu plan. Si no ves los cambios en unos minutos, contactanos.', 
+                    type: 'error' 
+                });
+                setPage(Page.Profile); // Mandar al perfil para que vean su estado
             } finally {
                 setVerifyingPayment(false);
             }
 
+            // Limpiar URL
             window.history.replaceState({}, '', '/');
-            setTimeout(() => { isProcessingPayment.current = false; }, 2000);
+            setTimeout(() => { isProcessingPayment.current = false; }, 1000);
 
-        } else if (paymentStatus === 'pending') {
-            setNotification({ text: 'Tu pago se está procesando.', type: 'success' });
+        // 2. PAGO PENDIENTE
+        } else if (mpStatus === 'pending' || mpStatus === 'in_process') {
+            setNotification({ text: 'Tu pago se está procesando. Te avisaremos cuando se acredite.', type: 'success' });
             setPage(Page.Dashboard);
             window.history.replaceState({}, '', '/');
-            setTimeout(() => { isProcessingPayment.current = false; }, 2000);
-        } else if (paymentStatus && ['failure', 'rejected', 'null'].includes(paymentStatus)) {
-            setNotification({ text: 'El pago fue rechazado o cancelado.', type: 'error' });
+            setTimeout(() => { isProcessingPayment.current = false; }, 1000);
+
+        // 3. PAGO FALLIDO O RECHAZADO
+        } else if (mpStatus && ['failure', 'rejected', 'null'].includes(mpStatus)) {
+            setNotification({ text: 'El pago no se pudo completar o fue cancelado.', type: 'error' });
             setPage(Page.Pricing);
             window.history.replaceState({}, '', '/');
-            setTimeout(() => { isProcessingPayment.current = false; }, 2000);
+            setTimeout(() => { isProcessingPayment.current = false; }, 1000);
+        
+        // 4. FALLBACK: Status desconocido pero hay parámetros (Evitar quedar "esperando")
+        } else if (mpStatus || paymentId) {
+            console.warn("Estado de pago desconocido, navegando a Dashboard por seguridad.");
+            setPage(Page.Dashboard);
+            window.history.replaceState({}, '', '/');
+            setTimeout(() => { isProcessingPayment.current = false; }, 1000);
         }
 
       } catch (err) {
         console.error("Initial load failed:", err);
-        await handleLogout();
+        // Si falla algo crítico, intentamos no dejar al usuario en blanco
+        setPage(Page.Home);
       } finally {
         setLoading(false);
       }
@@ -195,6 +215,7 @@ const App = () => {
       setSession(newSession);
       if (newSession) {
         await loadProfile(newSession.user.id);
+        // Solo navegamos si NO estamos procesando un pago para no interrumpir el flujo
         if (event === 'SIGNED_IN') {
              if (!isProcessingPayment.current) {
                  setPage(Page.Dashboard);
@@ -227,11 +248,11 @@ const App = () => {
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 px-4">
       <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-indigo-600 mb-4"></div>
       <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest text-center">
-        {verifyingPayment ? 'Verificando pago con el banco...' : 'Arquitectando...'}
+        {verifyingPayment ? 'Confirmando tu suscripción...' : 'Iniciando App...'}
       </p>
-      <p className="text-slate-300 font-medium text-[9px] mt-2 opacity-0 animate-pulse" style={{ animationDelay: '3s', animationFillMode: 'forwards' }}>
-        Optimizando recursos...
-      </p>
+      {verifyingPayment && (
+          <p className="text-slate-300 font-medium text-[9px] mt-2">No cierres esta ventana.</p>
+      )}
     </div>
   );
 
