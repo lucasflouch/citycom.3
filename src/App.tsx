@@ -47,7 +47,6 @@ const App = () => {
 
       if (loading && !isPaymentReturn && !verifyingPayment) {
         console.warn("🚨 Watchdog: Tiempo límite excedido. Forzando reinicio seguro.");
-        // Limpieza suave
         sessionStorage.clear();
         window.location.reload();
       }
@@ -130,14 +129,12 @@ const App = () => {
         if (sessionError) throw sessionError;
         setSession(cur);
         
-        // --- LÓGICA DE PROCESAMIENTO DE PAGO ---
+        // --- LÓGICA DE PROCESAMIENTO DE PAGO (V2 - RPC Strategy) ---
         const params = new URLSearchParams(window.location.search);
-        // Priorizamos collection_status que es el estándar técnico de MP, fallback a status
         const mpStatus = params.get('collection_status') || params.get('status'); 
         const paymentId = params.get('payment_id');
-        const paymentType = params.get('payment_type');
+        const externalRef = params.get('external_reference');
 
-        // Determinamos si estamos en un flujo de pago
         if (mpStatus || paymentId) {
            isProcessingPayment.current = true;
            console.log("Detectado retorno de pago:", { mpStatus, paymentId });
@@ -146,55 +143,62 @@ const App = () => {
         if (cur) await loadProfile(cur.user.id);
         await refreshData();
 
-        // 1. PAGO APROBADO (Soporte para 'approved' y 'success')
-        if ((mpStatus === 'approved' || mpStatus === 'success') && paymentId) {
+        // 1. PAGO APROBADO
+        if ((mpStatus === 'approved' || mpStatus === 'success') && paymentId && externalRef) {
             setVerifyingPayment(true);
             try {
-                // Llamamos a la Edge Function
-                const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-payment-v1', {
-                    body: { payment_id: paymentId }
+                // Parseamos la data que incrustamos al crear el pago (userId y planId)
+                const metadata = JSON.parse(externalRef);
+                
+                if (!metadata.planId || !metadata.userId) {
+                    throw new Error("Metadata de pago incompleta");
+                }
+
+                // Llamada a FUNCION DE BASE DE DATOS (RPC)
+                // Esto reemplaza a la Edge Function para evitar uso de terminal
+                const { error: rpcError } = await supabase.rpc('handle_payment_success', {
+                    p_user_id: metadata.userId,
+                    p_plan_id: metadata.planId,
+                    p_payment_id: paymentId
                 });
 
-                if (verifyError) throw verifyError;
-                if (verifyData?.error) throw new Error(verifyData.error);
+                if (rpcError) throw rpcError;
 
                 setNotification({ text: '¡Pago exitoso! Tu plan ha sido actualizado.', type: 'success' });
-                if (cur) await loadProfile(cur.user.id); // Recargar perfil para ver cambios
+                if (cur) await loadProfile(cur.user.id); 
                 setPage(Page.Dashboard);
 
             } catch (err: any) {
                 console.error("Payment verification failed:", err);
-                // Si falla la verificación pero MP dijo OK, avisamos al usuario pero no bloqueamos
                 setNotification({ 
-                    text: 'Pago recibido, pero hubo una demora actualizando tu plan. Si no ves los cambios en unos minutos, contactanos.', 
+                    text: 'Pago recibido. Si tu plan no se actualiza en breve, contactanos.', 
                     type: 'error' 
                 });
-                setPage(Page.Profile); // Mandar al perfil para que vean su estado
+                setPage(Page.Profile);
             } finally {
                 setVerifyingPayment(false);
             }
 
-            // Limpiar URL
             window.history.replaceState({}, '', '/');
             setTimeout(() => { isProcessingPayment.current = false; }, 1000);
 
         // 2. PAGO PENDIENTE
         } else if (mpStatus === 'pending' || mpStatus === 'in_process') {
-            setNotification({ text: 'Tu pago se está procesando. Te avisaremos cuando se acredite.', type: 'success' });
+            setNotification({ text: 'Tu pago se está procesando...', type: 'success' });
             setPage(Page.Dashboard);
             window.history.replaceState({}, '', '/');
             setTimeout(() => { isProcessingPayment.current = false; }, 1000);
 
-        // 3. PAGO FALLIDO O RECHAZADO
+        // 3. PAGO FALLIDO
         } else if (mpStatus && ['failure', 'rejected', 'null'].includes(mpStatus)) {
-            setNotification({ text: 'El pago no se pudo completar o fue cancelado.', type: 'error' });
+            setNotification({ text: 'El pago no se completó.', type: 'error' });
             setPage(Page.Pricing);
             window.history.replaceState({}, '', '/');
             setTimeout(() => { isProcessingPayment.current = false; }, 1000);
         
-        // 4. FALLBACK: Status desconocido pero hay parámetros (Evitar quedar "esperando")
+        // 4. FALLBACK
         } else if (mpStatus || paymentId) {
-            console.warn("Estado de pago desconocido, navegando a Dashboard por seguridad.");
+            console.warn("Estado ambiguo, volviendo a seguro.");
             setPage(Page.Dashboard);
             window.history.replaceState({}, '', '/');
             setTimeout(() => { isProcessingPayment.current = false; }, 1000);
@@ -202,7 +206,6 @@ const App = () => {
 
       } catch (err) {
         console.error("Initial load failed:", err);
-        // Si falla algo crítico, intentamos no dejar al usuario en blanco
         setPage(Page.Home);
       } finally {
         setLoading(false);
@@ -215,7 +218,6 @@ const App = () => {
       setSession(newSession);
       if (newSession) {
         await loadProfile(newSession.user.id);
-        // Solo navegamos si NO estamos procesando un pago para no interrumpir el flujo
         if (event === 'SIGNED_IN') {
              if (!isProcessingPayment.current) {
                  setPage(Page.Dashboard);
@@ -248,7 +250,7 @@ const App = () => {
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 px-4">
       <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-indigo-600 mb-4"></div>
       <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest text-center">
-        {verifyingPayment ? 'Confirmando tu suscripción...' : 'Iniciando App...'}
+        {verifyingPayment ? 'Activando tu Plan...' : 'Iniciando App...'}
       </p>
       {verifyingPayment && (
           <p className="text-slate-300 font-medium text-[9px] mt-2">No cierres esta ventana.</p>
@@ -319,7 +321,6 @@ const App = () => {
           />
         ) : <AuthPage onNavigate={handleNavigate} />)}
         
-        {/* Nuevas Páginas */}
         {page === Page.Profile && session && profile && (
           <ProfilePage 
             session={session}
