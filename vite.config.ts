@@ -1,11 +1,13 @@
+
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { VitePWA } from 'vite-plugin-pwa';
+// import { VitePWA } from 'vite-plugin-pwa'; // Desactivado temporalmente para limpiar caché
 
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     react(),
+    /* 
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg'], 
@@ -38,14 +40,13 @@ export default defineConfig({
           }
         ]
       },
-      // Estrategia de caché para evitar "Zombies"
       workbox: {
         cleanupOutdatedCaches: true,
         clientsClaim: true,
-        skipWaiting: true,
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}']
+        skipWaiting: true
       }
     })
+    */
   ],
   base: '/', 
   build: {
