@@ -37,6 +37,33 @@ const App = () => {
     banners: []
   }); 
 
+  // === PROTOCOLO DE AUTOCURACIÓN (SELF-HEALING) ===
+  // Si la aplicación se queda pegada en "loading" por más de 7 segundos,
+  // asumimos que el estado local (localStorage/Cookies) está corrupto o es incompatible.
+  useEffect(() => {
+    const watchdogTimer = setTimeout(() => {
+      if (loading) {
+        console.warn("🚨 Watchdog: La aplicación excedió el tiempo límite de carga. Ejecutando limpieza de emergencia.");
+        
+        // 1. Intentar limpiar la clave específica de Supabase (evita conflictos de sesión)
+        // Nota: La key suele tener el formato sb-<project-ref>-auth-token
+        Object.keys(localStorage).forEach(key => {
+            if (key.startsWith('sb-')) localStorage.removeItem(key);
+        });
+
+        // 2. Limpieza nuclear de almacenamiento
+        localStorage.clear();
+        sessionStorage.clear();
+
+        // 3. Forzar recarga desde el servidor (ignorando caché del navegador)
+        window.location.reload();
+      }
+    }, 7000); // 7 segundos de tolerancia
+
+    return () => clearTimeout(watchdogTimer);
+  }, [loading]);
+  // ================================================
+
   // Auto-ocultar notificación después de 5 segundos
   useEffect(() => {
     if (notification) {
@@ -155,6 +182,8 @@ const App = () => {
 
       } catch (err) {
         console.error("Initial load failed:", err);
+        // Si falla la carga inicial, intentamos logout para limpiar estado, 
+        // pero el Watchdog es la red de seguridad final.
         await handleLogout();
       } finally {
         setLoading(false);
@@ -201,6 +230,10 @@ const App = () => {
       <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-indigo-600 mb-4"></div>
       <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest text-center">
         Arquitectando...
+      </p>
+      {/* Mensaje sutil para que el usuario sepa que hay un sistema de recuperación */}
+      <p className="text-slate-300 font-medium text-[9px] mt-2 opacity-0 animate-pulse" style={{ animationDelay: '3s', animationFillMode: 'forwards' }}>
+        Optimizando recursos...
       </p>
     </div>
   );
