@@ -24,8 +24,8 @@ const App = () => {
   const [selectedComercioId, setSelectedComercioId] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   
-  // Usamos useRef para mantener estado durante renderizados iniciales críticos
-  const isProcessingPayment = useRef(false);
+  // Ref para evitar doble ejecución de lógica de pago en React 18 strict mode
+  const paymentProcessedRef = useRef(false);
 
   const [notification, setNotification] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
   
@@ -39,26 +39,28 @@ const App = () => {
     banners: []
   }); 
 
-  // === PROTOCOLO DE AUTOCURACIÓN (SELF-HEALING) ===
+  // === WATCHDOG: Evita que la app se quede congelada eternamente ===
   useEffect(() => {
     const watchdogTimer = setTimeout(() => {
-      const params = new URLSearchParams(window.location.search);
-      const isPaymentReturn = params.has('collection_status') || params.has('payment_id');
-
-      if (loading && !isPaymentReturn && !verifyingPayment) {
-        console.warn("🚨 Watchdog: Tiempo límite excedido. Forzando reinicio seguro.");
-        sessionStorage.clear();
-        window.location.reload();
+      // Si llevamos más de 10 segundos cargando o verificando...
+      if (loading || verifyingPayment) {
+        console.warn("🚨 Watchdog: Tiempo límite excedido.");
+        // Solo forzamos reinicio si NO estamos en medio de un pago activo exitoso
+        if (!paymentProcessedRef.current) {
+            setVerifyingPayment(false);
+            setLoading(false);
+            setNotification({ text: 'La carga tardó demasiado. Revisa tu conexión.', type: 'error' });
+        }
       }
-    }, 8000); 
+    }, 12000); 
 
     return () => clearTimeout(watchdogTimer);
   }, [loading, verifyingPayment]);
-  // ================================================
+  // ================================================================
 
   useEffect(() => {
     if (notification) {
-      const timer = setTimeout(() => setNotification(null), 5000);
+      const timer = setTimeout(() => setNotification(null), 6000);
       return () => clearTimeout(timer);
     }
   }, [notification]);
@@ -79,39 +81,6 @@ const App = () => {
     }
   }, []);
 
-  useEffect(() => {
-    if (!session) return;
-    let inactivityTimer: number;
-    const resetInactivityTimer = () => {
-      clearTimeout(inactivityTimer);
-      inactivityTimer = window.setTimeout(() => {
-        handleLogout(true);
-      }, 2 * 60 * 1000); 
-    };
-    const userActivityEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
-    userActivityEvents.forEach(event => {
-      window.addEventListener(event, resetInactivityTimer);
-    });
-    resetInactivityTimer();
-    return () => {
-      clearTimeout(inactivityTimer);
-      userActivityEvents.forEach(event => {
-        window.removeEventListener(event, resetInactivityTimer);
-      });
-    };
-  }, [session, handleLogout]);
-
-  const refreshData = async () => {
-    try {
-      const dbData = await fetchAppData();
-      if (dbData) {
-        setAppData(dbData);
-      }
-    } catch (e) {
-      console.error("Refresh data failed:", e);
-    }
-  };
-
   const loadProfile = useCallback(async (userId: string) => {
     try {
       const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
@@ -122,91 +91,104 @@ const App = () => {
     }
   }, []);
 
+  const refreshData = async () => {
+    try {
+      const dbData = await fetchAppData();
+      if (dbData) setAppData(dbData);
+    } catch (e) {
+      console.error("Refresh data failed:", e);
+    }
+  };
+
   useEffect(() => {
     const initApp = async () => {
       try {
+        // 1. Obtener Sesión
         const { data: { session: cur }, error: sessionError } = await supabase.auth.getSession();
         if (sessionError) throw sessionError;
         setSession(cur);
-        
-        // --- LÓGICA DE PROCESAMIENTO DE PAGO (V2 - RPC Strategy) ---
+
+        // 2. Cargar Datos Básicos
+        await refreshData();
+        if (cur) await loadProfile(cur.user.id);
+
+        // 3. --- LÓGICA DE PAGO (Prioridad Alta) ---
         const params = new URLSearchParams(window.location.search);
         const mpStatus = params.get('collection_status') || params.get('status'); 
         const paymentId = params.get('payment_id');
         const externalRef = params.get('external_reference');
 
-        if (mpStatus || paymentId) {
-           isProcessingPayment.current = true;
-           console.log("Detectado retorno de pago:", { mpStatus, paymentId });
-        }
+        // Si detectamos parámetros de pago y no lo hemos procesado aún
+        if ((mpStatus || paymentId) && !paymentProcessedRef.current) {
+           paymentProcessedRef.current = true; // Bloqueo inmediato
+           console.log("💰 Procesando retorno de Mercado Pago...", { mpStatus, paymentId });
 
-        if (cur) await loadProfile(cur.user.id);
-        await refreshData();
+           // CASO A: ÉXITO
+           if ((mpStatus === 'approved' || mpStatus === 'success') && paymentId && externalRef) {
+              setVerifyingPayment(true);
+              try {
+                  // Decodificar y Parsear Metadata
+                  // externalRef viene como JSON stringifyado: {"userId":"...","planId":"..."}
+                  let metadata;
+                  try {
+                      metadata = JSON.parse(externalRef);
+                  } catch (e) {
+                      console.error("Error parseando external_reference:", externalRef);
+                      throw new Error("Datos de referencia corruptos.");
+                  }
 
-        // 1. PAGO APROBADO
-        if ((mpStatus === 'approved' || mpStatus === 'success') && paymentId && externalRef) {
-            setVerifyingPayment(true);
-            try {
-                // Parseamos la data que incrustamos al crear el pago (userId y planId)
-                const metadata = JSON.parse(externalRef);
-                
-                if (!metadata.planId || !metadata.userId) {
-                    throw new Error("Metadata de pago incompleta");
-                }
+                  if (!metadata.planId || !metadata.userId) {
+                      throw new Error("Falta planId o userId en la referencia.");
+                  }
 
-                // Llamada a FUNCION DE BASE DE DATOS (RPC)
-                // Esto reemplaza a la Edge Function para evitar uso de terminal
-                const { error: rpcError } = await supabase.rpc('handle_payment_success', {
-                    p_user_id: metadata.userId,
-                    p_plan_id: metadata.planId,
-                    p_payment_id: paymentId
-                });
+                  // LLAMADA RPC A SUPABASE (Backend)
+                  // Nota: p_plan_id ahora debe ser TEXT en la base de datos
+                  const { error: rpcError } = await supabase.rpc('handle_payment_success', {
+                      p_user_id: metadata.userId,
+                      p_plan_id: metadata.planId, 
+                      p_payment_id: paymentId
+                  });
 
-                if (rpcError) throw rpcError;
+                  if (rpcError) throw rpcError;
 
-                setNotification({ text: '¡Pago exitoso! Tu plan ha sido actualizado.', type: 'success' });
-                if (cur) await loadProfile(cur.user.id); 
-                setPage(Page.Dashboard);
+                  // Éxito total
+                  setNotification({ text: '¡Pago exitoso! Disfrutá tu nuevo plan.', type: 'success' });
+                  
+                  // Recargar perfil forzosamente para ver el nuevo plan
+                  if (cur) await loadProfile(cur.user.id);
+                  else if (metadata.userId) await loadProfile(metadata.userId);
 
-            } catch (err: any) {
-                console.error("Payment verification failed:", err);
-                setNotification({ 
-                    text: 'Pago recibido. Si tu plan no se actualiza en breve, contactanos.', 
-                    type: 'error' 
-                });
-                setPage(Page.Profile);
-            } finally {
-                setVerifyingPayment(false);
-            }
+                  setPage(Page.Dashboard);
 
-            window.history.replaceState({}, '', '/');
-            setTimeout(() => { isProcessingPayment.current = false; }, 1000);
+              } catch (err: any) {
+                  console.error("Error verificando pago:", err);
+                  setNotification({ 
+                      text: 'Pago recibido, pero hubo un error actualizando tu perfil. Contactanos.', 
+                      type: 'error' 
+                  });
+                  setPage(Page.Profile);
+              } finally {
+                  setVerifyingPayment(false);
+                  // Limpiar URL
+                  window.history.replaceState({}, '', '/');
+              }
+           
+           // CASO B: PENDIENTE
+           } else if (mpStatus === 'pending' || mpStatus === 'in_process') {
+              setNotification({ text: 'El pago se está procesando. Te avisaremos cuando finalice.', type: 'success' });
+              setPage(Page.Dashboard);
+              window.history.replaceState({}, '', '/');
 
-        // 2. PAGO PENDIENTE
-        } else if (mpStatus === 'pending' || mpStatus === 'in_process') {
-            setNotification({ text: 'Tu pago se está procesando...', type: 'success' });
-            setPage(Page.Dashboard);
-            window.history.replaceState({}, '', '/');
-            setTimeout(() => { isProcessingPayment.current = false; }, 1000);
-
-        // 3. PAGO FALLIDO
-        } else if (mpStatus && ['failure', 'rejected', 'null'].includes(mpStatus)) {
-            setNotification({ text: 'El pago no se completó.', type: 'error' });
-            setPage(Page.Pricing);
-            window.history.replaceState({}, '', '/');
-            setTimeout(() => { isProcessingPayment.current = false; }, 1000);
-        
-        // 4. FALLBACK
-        } else if (mpStatus || paymentId) {
-            console.warn("Estado ambiguo, volviendo a seguro.");
-            setPage(Page.Dashboard);
-            window.history.replaceState({}, '', '/');
-            setTimeout(() => { isProcessingPayment.current = false; }, 1000);
+           // CASO C: FALLIDO
+           } else if (mpStatus && ['failure', 'rejected', 'null'].includes(mpStatus)) {
+              setNotification({ text: 'El pago fue rechazado o cancelado.', type: 'error' });
+              setPage(Page.Pricing);
+              window.history.replaceState({}, '', '/');
+           }
         }
 
       } catch (err) {
         console.error("Initial load failed:", err);
-        setPage(Page.Home);
       } finally {
         setLoading(false);
       }
@@ -218,10 +200,9 @@ const App = () => {
       setSession(newSession);
       if (newSession) {
         await loadProfile(newSession.user.id);
-        if (event === 'SIGNED_IN') {
-             if (!isProcessingPayment.current) {
-                 setPage(Page.Dashboard);
-             }
+        // Solo redirigir al login si NO estamos procesando un pago
+        if (event === 'SIGNED_IN' && !paymentProcessedRef.current) {
+            setPage(Page.Dashboard);
         }
       } else if (event === 'SIGNED_OUT') {
         setProfile(null);
@@ -249,11 +230,13 @@ const App = () => {
   if (loading || verifyingPayment) return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 px-4">
       <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-indigo-600 mb-4"></div>
-      <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest text-center">
-        {verifyingPayment ? 'Activando tu Plan...' : 'Iniciando App...'}
+      <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest text-center animate-pulse">
+        {verifyingPayment ? 'Confirmando Pago...' : 'Iniciando App...'}
       </p>
       {verifyingPayment && (
-          <p className="text-slate-300 font-medium text-[9px] mt-2">No cierres esta ventana.</p>
+          <p className="text-slate-300 font-medium text-[9px] mt-2 max-w-xs text-center">
+            Estamos activando tu plan en nuestra base de datos segura.
+          </p>
       )}
     </div>
   );
@@ -264,7 +247,7 @@ const App = () => {
     <div className="bg-slate-50 min-h-screen font-sans relative">
       {notification && (
         <div className={`fixed top-24 left-1/2 -translate-x-1/2 z-[9999] px-8 py-4 rounded-3xl shadow-2xl animate-fade-up font-black uppercase text-xs tracking-widest text-white flex items-center gap-3 ${notification.type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}>
-            <span>{notification.type === 'success' ? '✓' : '✕'}</span>
+            <span className="text-lg">{notification.type === 'success' ? '✓' : '✕'}</span>
             {notification.text}
         </div>
       )}
