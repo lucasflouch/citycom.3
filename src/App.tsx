@@ -16,19 +16,9 @@ import AdminPage from './pages/AdminPage';
 import Header from './components/Header';
 
 const App = () => {
+  // --- ESTADO GLOBAL ---
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [verifyingPayment, setVerifyingPayment] = useState(false); 
-  const [page, setPage] = useState<PageValue>(Page.Home);
-  const [selectedComercioId, setSelectedComercioId] = useState<string | null>(null);
-  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
-  
-  // Ref para evitar doble ejecución de lógica de pago en React 18 strict mode
-  const paymentProcessedRef = useRef(false);
-
-  const [notification, setNotification] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
-  
   const [appData, setAppData] = useState<AppData>({
     provincias: [], 
     ciudades: [], 
@@ -39,156 +29,193 @@ const App = () => {
     banners: []
   }); 
 
-  // === WATCHDOG: Evita que la app se quede congelada eternamente ===
-  useEffect(() => {
-    const watchdogTimer = setTimeout(() => {
-      // Si llevamos más de 10 segundos cargando o verificando...
-      if (loading || verifyingPayment) {
-        console.warn("🚨 Watchdog: Tiempo límite excedido.");
-        // Solo forzamos reinicio si NO estamos en medio de un pago activo exitoso
-        if (!paymentProcessedRef.current) {
-            setVerifyingPayment(false);
-            setLoading(false);
-            setNotification({ text: 'La carga tardó demasiado. Revisa tu conexión.', type: 'error' });
-        }
-      }
-    }, 12000); 
+  // --- ESTADO UI ---
+  const [loading, setLoading] = useState(true);
+  const [verifyingPayment, setVerifyingPayment] = useState(false); 
+  const [page, setPage] = useState<PageValue>(Page.Home);
+  const [notification, setNotification] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
 
-    return () => clearTimeout(watchdogTimer);
-  }, [loading, verifyingPayment]);
-  // ================================================================
+  // --- ESTADO DE NAVEGACIÓN ---
+  const [selectedComercioId, setSelectedComercioId] = useState<string | null>(null);
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+  
+  // --- REFS ---
+  const paymentProcessedRef = useRef(false);
 
-  useEffect(() => {
-    if (notification) {
-      const timer = setTimeout(() => setNotification(null), 6000);
-      return () => clearTimeout(timer);
-    }
-  }, [notification]);
-
+  // ==================================================================================
+  // 1. LOGOUT OPTIMISTA (A prueba de balas)
+  // Limpia el estado visual INMEDIATAMENTE, luego intenta cerrar sesión en el servidor.
+  // ==================================================================================
   const handleLogout = useCallback(async (isAutoLogout: boolean = false) => {
+    // 1. Limpieza Visual Inmediata
+    setSession(null);
+    setProfile(null);
+    setPage(Page.Home);
+    
+    // 2. Limpieza de Storage (Anti-Zombis)
+    localStorage.removeItem('sb-sqmjnynklpwjceyuyemz-auth-token'); // Limpia token específico de Supabase
+    localStorage.clear(); // Limpia todo por si acaso
+
+    // 3. Notificación opcional
+    if (isAutoLogout) {
+      alert("Tu sesión ha expirado o los datos son inválidos. Por favor ingresá nuevamente.");
+    }
+
+    // 4. Petición al Backend (Fire and Forget)
     try {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
+      await supabase.auth.signOut();
     } catch (error) {
-      console.error("Error during sign out:", error);
-    } finally {
-      setSession(null);
-      setProfile(null);
-      setPage(Page.Home);
-      if (isAutoLogout) {
-        alert("Por seguridad, tu sesión se ha cerrado automáticamente por inactividad.");
-      }
+      console.warn("Error secundario al cerrar sesión en servidor:", error);
     }
   }, []);
 
+  // ==================================================================================
+  // 2. CARGA DE PERFIL (Helper)
+  // Se usa para refrescar datos después de editar perfil o cambiar plan
+  // ==================================================================================
   const loadProfile = useCallback(async (userId: string) => {
     try {
-      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+      
       if (error) throw error;
-      if (data) setProfile(data as Profile);
+      if (data) {
+          setProfile(data as Profile);
+          return data;
+      }
+      return null;
     } catch (e) { 
       console.error("Error loading profile:", e); 
+      return null;
     }
   }, []);
 
-  const refreshData = async () => {
-    try {
-      const dbData = await fetchAppData();
-      if (dbData) setAppData(dbData);
-    } catch (e) {
-      console.error("Refresh data failed:", e);
+  // ==================================================================================
+  // 3. PROCESAMIENTO DE PAGOS (No Bloqueante)
+  // ==================================================================================
+  const handlePaymentCallback = async (currentUserId: string) => {
+    // Si ya procesamos un pago en este montaje, salimos.
+    if (paymentProcessedRef.current) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const mpStatus = params.get('collection_status') || params.get('status'); 
+    const paymentId = params.get('payment_id');
+    const externalRef = params.get('external_reference');
+
+    // Si no hay parámetros de pago, no hacemos nada
+    if (!mpStatus && !paymentId) return;
+
+    console.log("💳 Detectado retorno de Mercado Pago:", mpStatus);
+    paymentProcessedRef.current = true; // Bloqueamos re-entrada
+
+    // Limpiamos la URL visualmente para que el usuario no vea los parámetros feos
+    // Pero NO recargamos la página todavía
+    window.history.replaceState({}, '', '/');
+
+    // A. PAGO EXITOSO
+    if ((mpStatus === 'approved' || mpStatus === 'success') && paymentId && externalRef) {
+        setVerifyingPayment(true);
+        try {
+            let metadata;
+            try {
+                metadata = JSON.parse(externalRef);
+            } catch (e) {
+                throw new Error("Referencia de pago corrupta.");
+            }
+
+            // Validar que el pago corresponde al usuario actual (Seguridad)
+            if (metadata.userId !== currentUserId) {
+                console.warn("El pago pertenece a otro usuario.");
+                return; 
+            }
+
+            // Llamada RPC para actualizar base de datos
+            const { error: rpcError } = await supabase.rpc('handle_payment_success', {
+                p_user_id: metadata.userId,
+                p_plan_id: metadata.planId, 
+                p_payment_id: paymentId
+            });
+
+            if (rpcError) throw rpcError;
+
+            // Refrescar perfil en caliente
+            await loadProfile(currentUserId);
+            
+            setNotification({ text: '¡Pago exitoso! Plan activado.', type: 'success' });
+            setPage(Page.Dashboard);
+
+        } catch (err: any) {
+            console.error("Error procesando pago:", err);
+            setNotification({ 
+                text: 'Hubo un error activando el plan. Contactá a soporte.', 
+                type: 'error' 
+            });
+        } finally {
+            setVerifyingPayment(false);
+        }
+    } 
+    // B. PAGO FALLIDO O CANCELADO
+    else if (mpStatus === 'failure' || mpStatus === 'rejected' || mpStatus === 'null') {
+        setNotification({ text: 'El pago fue cancelado o rechazado.', type: 'error' });
+        // No deslogueamos, solo mostramos el error y dejamos al usuario en su estado anterior
+        if (page === Page.Pricing) return; // Si ya estaba en pricing, se queda ahi
+        setPage(Page.Dashboard);
+    }
+    // C. PENDIENTE
+    else if (mpStatus === 'pending' || mpStatus === 'in_process') {
+        setNotification({ text: 'Pago pendiente de acreditación.', type: 'success' });
+        setPage(Page.Dashboard);
     }
   };
 
+  // ==================================================================================
+  // 4. INICIALIZACIÓN DE APP (Orquestador Principal)
+  // ==================================================================================
   useEffect(() => {
     const initApp = async () => {
+      setLoading(true);
       try {
-        // 1. Obtener Sesión
-        const { data: { session: cur }, error: sessionError } = await supabase.auth.getSession();
-        if (sessionError) throw sessionError;
-        setSession(cur);
+        // A. Cargar Datos Globales (Comercios, Rubros, etc.)
+        const dbData = await fetchAppData();
+        if (dbData) setAppData(dbData);
 
-        // 2. Cargar Datos Básicos
-        await refreshData();
-        if (cur) await loadProfile(cur.user.id);
+        // B. Verificar Sesión
+        const { data: { session: curSession }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+            throw sessionError; // Ir al catch -> Logout
+        }
 
-        // 3. --- LÓGICA DE PAGO (Prioridad Alta) ---
-        const params = new URLSearchParams(window.location.search);
-        const mpStatus = params.get('collection_status') || params.get('status'); 
-        const paymentId = params.get('payment_id');
-        const externalRef = params.get('external_reference');
+        if (curSession) {
+            // C. INTEGRIDAD DE DATOS (Anti-Zombi)
+            // Si hay sesión, TIENE que haber perfil. Si no, algo está roto.
+            const { data: userProfile, error: profileError } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', curSession.user.id)
+                .maybeSingle();
 
-        // Si detectamos parámetros de pago y no lo hemos procesado aún
-        if ((mpStatus || paymentId) && !paymentProcessedRef.current) {
-           paymentProcessedRef.current = true; // Bloqueo inmediato
-           console.log("💰 Procesando retorno de Mercado Pago...", { mpStatus, paymentId });
+            if (profileError || !userProfile) {
+                console.warn("🚨 ZOMBI DETECTADO: Sesión sin perfil válido. Ejecutando purga.");
+                await handleLogout(true); // Auto-logout
+                return; // Detener inicialización
+            }
 
-           // CASO A: ÉXITO
-           if ((mpStatus === 'approved' || mpStatus === 'success') && paymentId && externalRef) {
-              setVerifyingPayment(true);
-              try {
-                  // Decodificar y Parsear Metadata
-                  // externalRef viene como JSON stringifyado: {"userId":"...","planId":"..."}
-                  let metadata;
-                  try {
-                      metadata = JSON.parse(externalRef);
-                  } catch (e) {
-                      console.error("Error parseando external_reference:", externalRef);
-                      throw new Error("Datos de referencia corruptos.");
-                  }
+            // D. Estado Saludable -> Iniciar sesión en UI
+            setSession(curSession);
+            setProfile(userProfile as Profile);
 
-                  if (!metadata.planId || !metadata.userId) {
-                      throw new Error("Falta planId o userId en la referencia.");
-                  }
-
-                  // LLAMADA RPC A SUPABASE (Backend)
-                  // Nota: p_plan_id ahora debe ser TEXT en la base de datos
-                  const { error: rpcError } = await supabase.rpc('handle_payment_success', {
-                      p_user_id: metadata.userId,
-                      p_plan_id: metadata.planId, 
-                      p_payment_id: paymentId
-                  });
-
-                  if (rpcError) throw rpcError;
-
-                  // Éxito total
-                  setNotification({ text: '¡Pago exitoso! Disfrutá tu nuevo plan.', type: 'success' });
-                  
-                  // Recargar perfil forzosamente para ver el nuevo plan
-                  if (cur) await loadProfile(cur.user.id);
-                  else if (metadata.userId) await loadProfile(metadata.userId);
-
-                  setPage(Page.Dashboard);
-
-              } catch (err: any) {
-                  console.error("Error verificando pago:", err);
-                  setNotification({ 
-                      text: 'Pago recibido, pero hubo un error actualizando tu perfil. Contactanos.', 
-                      type: 'error' 
-                  });
-                  setPage(Page.Profile);
-              } finally {
-                  setVerifyingPayment(false);
-                  // Limpiar URL
-                  window.history.replaceState({}, '', '/');
-              }
-           
-           // CASO B: PENDIENTE
-           } else if (mpStatus === 'pending' || mpStatus === 'in_process') {
-              setNotification({ text: 'El pago se está procesando. Te avisaremos cuando finalice.', type: 'success' });
-              setPage(Page.Dashboard);
-              window.history.replaceState({}, '', '/');
-
-           // CASO C: FALLIDO
-           } else if (mpStatus && ['failure', 'rejected', 'null'].includes(mpStatus)) {
-              setNotification({ text: 'El pago fue rechazado o cancelado.', type: 'error' });
-              setPage(Page.Pricing);
-              window.history.replaceState({}, '', '/');
-           }
+            // E. Chequear Pagos (Solo si estamos logueados y sanos)
+            await handlePaymentCallback(curSession.user.id);
         }
 
       } catch (err) {
-        console.error("Initial load failed:", err);
+        console.error("Fallo crítico en inicio:", err);
+        // Si falla algo crítico en el arranque, limpiamos sesión por seguridad
+        await handleLogout(false);
       } finally {
         setLoading(false);
       }
@@ -196,23 +223,28 @@ const App = () => {
 
     initApp();
 
+    // F. Listener de Cambios de Auth (Para login/logout en otras pestañas)
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event: string, newSession: Session | null) => {
-      setSession(newSession);
-      if (newSession) {
-        await loadProfile(newSession.user.id);
-        // Solo redirigir al login si NO estamos procesando un pago
-        if (event === 'SIGNED_IN' && !paymentProcessedRef.current) {
-            setPage(Page.Dashboard);
-        }
-      } else if (event === 'SIGNED_OUT') {
+      if (event === 'SIGNED_OUT') {
+        setSession(null);
         setProfile(null);
         setPage(Page.Home);
+      } else if (event === 'SIGNED_IN' && newSession) {
+        setSession(newSession);
+        await loadProfile(newSession.user.id);
+        // Si es un inicio de sesión normal (no refresco), ir al dashboard
+        if (!paymentProcessedRef.current) {
+            setPage(Page.Dashboard);
+        }
       }
     });
 
     return () => authListener.subscription.unsubscribe();
-  }, [loadProfile, handleLogout]);
+  }, [handleLogout, loadProfile]);
 
+  // ==================================================================================
+  // 5. HELPER DE NAVEGACIÓN
+  // ==================================================================================
   const handleNavigate = (newPage: PageValue, entity?: Comercio | Conversation) => {
     if (newPage === Page.ComercioDetail && entity && 'nombre' in entity) {
       setSelectedComercioId(entity.id);
@@ -227,6 +259,23 @@ const App = () => {
     window.scrollTo(0, 0);
   };
 
+  const refreshData = async () => {
+    const dbData = await fetchAppData();
+    if (dbData) setAppData(dbData);
+  };
+
+  // ==================================================================================
+  // 6. RENDERIZADO (UI)
+  // ==================================================================================
+  
+  // Watchdog UI para notificaciones temporales
+  useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => setNotification(null), 6000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
+
   if (loading || verifyingPayment) return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 px-4">
       <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-indigo-600 mb-4"></div>
@@ -235,7 +284,7 @@ const App = () => {
       </p>
       {verifyingPayment && (
           <p className="text-slate-300 font-medium text-[9px] mt-2 max-w-xs text-center">
-            Estamos activando tu plan en nuestra base de datos segura.
+            Estamos validando tu suscripción de forma segura.
           </p>
       )}
     </div>
@@ -253,9 +302,13 @@ const App = () => {
       )}
 
       <Header session={session} profile={profile} onNavigate={handleNavigate} onLogout={() => handleLogout(false)} />
+      
       <main className="container mx-auto max-w-7xl px-4 py-8">
+        
         {page === Page.Home && <HomePage onNavigate={handleNavigate} data={appData} />}
+        
         {page === Page.Auth && <AuthPage onNavigate={handleNavigate} />}
+        
         {page === Page.Dashboard && (session ? (
           <DashboardPage 
             session={session} 
@@ -265,6 +318,7 @@ const App = () => {
             refreshData={refreshData}
           />
         ) : <AuthPage onNavigate={handleNavigate} />)}
+
         {(page === Page.CreateComercio || page === Page.EditComercio) && (session ? 
           <CreateComercioPage 
             session={session} 
@@ -275,6 +329,7 @@ const App = () => {
             editingComercio={page === Page.EditComercio ? currentComercio : null} 
           /> : <AuthPage onNavigate={handleNavigate} />
         )}
+
         {page === Page.ComercioDetail && selectedComercioId && (
           <ComercioDetailPage 
             comercioId={selectedComercioId} 
@@ -285,6 +340,7 @@ const App = () => {
             onReviewSubmitted={refreshData}
           />
         )}
+
          {page === Page.Messages && (session && profile ? (
           <MessagesPage 
             session={session} 
@@ -294,6 +350,7 @@ const App = () => {
             initialConversation={selectedConversation}
           />
         ) : <AuthPage onNavigate={handleNavigate} />)}
+
         {page === Page.Pricing && (session && profile ? (
           <PricingPage 
             profile={profile}
