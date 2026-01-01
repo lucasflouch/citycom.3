@@ -2,6 +2,17 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
+    
+    <!-- Content Security Policy: Whitelist estricta para prevenir inyecciones pero permitir servicios externos necesarios -->
+    <meta http-equiv="Content-Security-Policy" content="
+      default-src 'self';
+      script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com;
+      style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com;
+      img-src 'self' data: blob: https:;
+      font-src 'self' https://fonts.gstatic.com;
+      connect-src 'self' https://*.supabase.co https://nominatim.openstreetmap.org https://apis.datos.gob.ar https://api.mercadopago.com wss://*.supabase.co;
+    ">
+
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
