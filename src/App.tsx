@@ -50,10 +50,9 @@ const App = () => {
     setProfile(null);
     setPage(Page.Home);
     localStorage.removeItem('sb-sqmjnynklpwjceyuyemz-auth-token');
-    // No borramos todo localStorage para preservar preferencias si las hubiera, solo token
     
     if (isAutoLogout) {
-      alert("Tu sesión ha expirado o los datos son inválidos. Por favor ingresá nuevamente.");
+      setNotification({ text: "Tu sesión ha expirado. Ingresá nuevamente.", type: 'error' });
     }
 
     try {
@@ -88,30 +87,22 @@ const App = () => {
 
   // ==================================================================================
   // 3. DETECCIÓN Y PROCESAMIENTO DE PAGOS (SOLUCIÓN ANTI-LOOP)
-  // Este efecto corre UNA SOLA VEZ al inicio. Si detecta parámetros, limpia la URL
-  // inmediatamente y luego procesa.
   // ==================================================================================
   useEffect(() => {
     const processPaymentReturn = async () => {
-      // Si ya procesamos, salir inmediatamente para evitar loops.
       if (paymentProcessedRef.current) return;
 
       const params = new URLSearchParams(window.location.search);
       const paymentId = params.get('payment_id');
       const status = params.get('status') || params.get('collection_status');
       
-      // Chequeo rápido: ¿Hay indicios de pago?
       if (!paymentId && !status) return;
 
-      // 1. BLOQUEAR RE-ENTRADA Y LIMPIAR URL (CRÍTICO)
-      // Esto evita que React vuelva a leer los params en el siguiente render.
       paymentProcessedRef.current = true;
       console.log("💳 Pago detectado. ID:", paymentId, "Status:", status);
       
-      // Limpiamos la URL visualmente y del historial
       window.history.replaceState(null, '', window.location.pathname);
 
-      // 2. VALIDAR ESTADO INICIAL
       if (status !== 'approved' && status !== 'success') {
         if (status === 'pending' || status === 'in_process') {
            setNotification({ text: 'El pago está procesándose. Te avisaremos cuando finalice.', type: 'success' });
@@ -128,10 +119,8 @@ const App = () => {
           return;
       }
 
-      // 3. PROCESAR CON BACKEND (Edge Function)
       setVerifyingPayment(true);
       try {
-        // Invocamos la Edge Function segura que verifica con MercadoPago y actualiza la DB
         const { data: responseData, error: funcError } = await supabase.functions.invoke('verify-payment-v1', {
             body: { payment_id: paymentId }
         });
@@ -139,23 +128,20 @@ const App = () => {
         if (funcError) throw new Error(funcError.message || 'Error de conexión con validador');
         if (!responseData?.success) throw new Error(responseData?.error || 'Verificación fallida en servidor');
 
-        // 4. ÉXITO
         setNotification({ text: '¡Excelente! Tu plan ha sido activado exitosamente.', type: 'success' });
         
-        // Forzamos recarga del perfil si hay sesión activa para reflejar el nuevo plan inmediatamente
         const { data: { session: currentSession } } = await supabase.auth.getSession();
         if (currentSession) {
             await loadProfile(currentSession.user.id);
             setPage(Page.Dashboard);
         } else {
-            // Caso raro: Pagó pero perdió la sesión. Lo mandamos al login.
             setPage(Page.Auth);
         }
 
       } catch (err: any) {
         console.error("Error crítico verificando pago:", err);
         setNotification({ 
-            text: `Hubo un problema activando el plan automáticamente: ${err.message}. Si se debitó el dinero, contactá a soporte con el ID: ${paymentId}`, 
+            text: `Hubo un problema activando el plan: ${err.message}. Contactá a soporte con ID: ${paymentId}`, 
             type: 'error' 
         });
         setPage(Page.Pricing);
@@ -168,49 +154,65 @@ const App = () => {
   }, [loadProfile]);
 
   // ==================================================================================
-  // 4. INICIALIZACIÓN DE APP
+  // 4. INICIALIZACIÓN DE APP (CON TIMEOUT SAFEGUARD)
   // ==================================================================================
   useEffect(() => {
+    let mounted = true;
+    let safetyTimeout: any = null;
+
     const initApp = async () => {
       setLoading(true);
+
+      // --- SAFETY NET ---
+      // Si por alguna razón (red, firewall, bug) la carga tarda más de 7 segundos,
+      // desbloqueamos la app forzosamente para que el usuario pueda interactuar.
+      safetyTimeout = setTimeout(() => {
+        if (mounted && loading) {
+             console.warn("⚠️ initApp excedió el tiempo límite. Forzando apertura.");
+             setLoading(false);
+             setNotification({ text: 'La conexión es lenta. Cargando en modo limitado.', type: 'error' });
+        }
+      }, 7000);
+
       try {
         // A. Cargar Datos Globales
         const dbData = await fetchAppData();
-        if (dbData) setAppData(dbData);
+        if (mounted && dbData) setAppData(dbData);
 
         // B. Verificar Sesión Actual
         const { data: { session: curSession }, error: sessionError } = await supabase.auth.getSession();
         
         if (sessionError) throw sessionError;
 
-        if (curSession) {
+        if (mounted && curSession) {
             const { data: userProfile, error: profileError } = await supabase
                 .from('profiles')
                 .select('*')
                 .eq('id', curSession.user.id)
                 .maybeSingle();
 
-            if (profileError || !userProfile) {
-                console.warn("Sesión sin perfil válido en DB. Cerrando sesión.");
-                await handleLogout(true);
-                return;
+            if (!userProfile) {
+                // Si hay sesión pero no perfil, limpiamos silenciosamente
+                console.warn("Sesión huérfana detectada.");
+                await handleLogout(false); 
+            } else {
+                setSession(curSession);
+                setProfile(userProfile as Profile);
             }
-
-            setSession(curSession);
-            setProfile(userProfile as Profile);
         }
 
       } catch (err) {
         console.error("Error inicio app:", err);
-        // No forzamos logout aquí para permitir navegar como invitado si falla algo menor
       } finally {
-        setLoading(false);
+        clearTimeout(safetyTimeout);
+        if (mounted) setLoading(false);
       }
     };
 
     initApp();
 
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event: string, newSession: Session | null) => {
+      if (!mounted) return;
       if (event === 'SIGNED_OUT') {
         setSession(null);
         setProfile(null);
@@ -218,14 +220,14 @@ const App = () => {
       } else if (event === 'SIGNED_IN' && newSession) {
         setSession(newSession);
         await loadProfile(newSession.user.id);
-        // Importante: No redirigir si estamos procesando un pago, dejamos que el efecto de pago maneje la navegación
-        if (!paymentProcessedRef.current) {
-            // Comportamiento normal de login
-        }
       }
     });
 
-    return () => authListener.subscription.unsubscribe();
+    return () => { 
+        mounted = false;
+        if (safetyTimeout) clearTimeout(safetyTimeout);
+        authListener.subscription.unsubscribe();
+    };
   }, [handleLogout, loadProfile]);
 
   // ==================================================================================
@@ -256,12 +258,11 @@ const App = () => {
   
   useEffect(() => {
     if (notification) {
-      const timer = setTimeout(() => setNotification(null), 10000); // 10 segundos para leer bien los mensajes de pago
+      const timer = setTimeout(() => setNotification(null), 10000); 
       return () => clearTimeout(timer);
     }
   }, [notification]);
 
-  // Pantalla de Bloqueo durante verificación de pago
   if (verifyingPayment) return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 px-4">
       <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-indigo-600 mb-6"></div>

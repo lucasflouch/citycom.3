@@ -52,13 +52,14 @@ export const fetchAppData = async (): Promise<AppData | null> => {
       if (orderField) query = query.order(orderField);
       const { data, error } = await query;
       if (error) {
-        console.warn(`Error en tabla ${tableName}:`, error.message);
+        console.warn(`DataService: Aviso tabla ${tableName}:`, error.message);
         return [];
       }
       return data || [];
     };
 
-    const [provs, ciuds, rubs, subRubs, plans, coms, revs, profiles] = await Promise.all([
+    // Usamos Promise.allSettled para que si falla una tabla, no explote todo el inicio
+    const results = await Promise.allSettled([
       fetchSafe('provincias', 'nombre'),
       fetchSafe('ciudades', 'nombre'),
       fetchSafe('rubros', 'nombre'),
@@ -68,16 +69,31 @@ export const fetchAppData = async (): Promise<AppData | null> => {
       fetchSafe('reviews'),
       fetchSafe('profiles')
     ]);
+
+    // Función auxiliar para extraer el resultado o devolver array vacío
+    const getResult = (index: number) => {
+        const res = results[index];
+        return res.status === 'fulfilled' ? res.value : [];
+    };
+
+    const provs = getResult(0);
+    const ciuds = getResult(1);
+    const rubs = getResult(2);
+    const subRubs = getResult(3);
+    const plans = getResult(4);
+    const coms = getResult(5);
+    const revs = getResult(6);
+    const profiles = getResult(7);
     
     const reviewsByComercioId = new Map<string, Review[]>();
-    revs.forEach(review => {
+    revs.forEach((review: any) => {
       const key = String(review.comercio_id);
       if (!reviewsByComercioId.has(key)) reviewsByComercioId.set(key, []);
       reviewsByComercioId.get(key)!.push(mapReview(review));
     });
 
-    const profilesMap = new Map<string, Profile>(profiles.map(p => [String(p.id), p as Profile]));
-    const plansMap = new Map<string, SubscriptionPlan>(plans.map(p => [String(p.id), {
+    const profilesMap = new Map<string, Profile>(profiles.map((p: any) => [String(p.id), p as Profile]));
+    const plansMap = new Map<string, SubscriptionPlan>(plans.map((p: any) => [String(p.id), {
         id: String(p.id),
         nombre: p.nombre,
         precio: Number(p.precio),
@@ -118,6 +134,9 @@ export const fetchAppData = async (): Promise<AppData | null> => {
     };
   } catch (error) {
     console.error("Error crítico en fetchAppData:", error);
-    return null;
+    // Retornamos un objeto vacío válido para que la UI al menos cargue los componentes vacíos
+    return {
+        provincias: [], ciudades: [], rubros: [], subRubros: [], plans: [], comercios: [], banners: []
+    };
   }
 };
